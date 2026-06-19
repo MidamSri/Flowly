@@ -1,0 +1,12 @@
+packages:
+  - 'shared'
+  - 'backend'
+  - 'extension'
+
+allowBuilds:
+  "@google/genai": true
+  esbuild: true
+  protobufjs: true
+
+minimumReleaseAgeExclude:
+  - "@google/genai"

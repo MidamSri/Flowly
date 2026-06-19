@@ -1,0 +1,29 @@
+{
+  "name": "@flowly/backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "test:headless": "tsx src/run_headless.ts",
+    "test": "tsx src/test_parser.ts"
+  },
+  "dependencies": {
+    "@fastify/cors": "^9.0.1",
+    "@flowly/shared": "workspace:*",
+    "@google/genai": "^2.9.0",
+    "dotenv": "^16.4.5",
+    "fastify": "^4.27.0",
+    "pino": "^9.1.0",
+    "pino-pretty": "^11.1.0",
+    "playwright": "^1.44.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.12",
+    "tsx": "^4.10.5",
+    "typescript": "^5.4.5"
+  }
+}
