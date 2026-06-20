@@ -2,6 +2,7 @@ import { executeStep } from './executeStep';
 import { eventBus } from './eventBus';
 import * as store from '../state/store';
 import { createHistoryItem } from '../timeline/historyManager';
+import { extractAndStoreMemory } from '../memory/memoryExtractor';
 
 /**
  * Runs the sequence of steps in the action plan.
@@ -112,6 +113,9 @@ export async function executePlan(tabId: number, signal: AbortSignal): Promise<v
     store.addHistoryItem(historyItem);
     eventBus.emit('RUN_RECORDED');
 
+    // Extract and store successful memory pattern
+    await extractAndStoreMemory(store.getState(), 'success');
+
   } catch (err: any) {
     const isAbort = err.name === 'AbortError' || signal.aborted;
 
@@ -146,6 +150,9 @@ export async function executePlan(tabId: number, signal: AbortSignal): Promise<v
       const historyItem = createHistoryItem(store.getState(), 'failed');
       store.addHistoryItem(historyItem);
       eventBus.emit('RUN_RECORDED');
+
+      // Extract and store failure memory pattern
+      await extractAndStoreMemory(store.getState(), 'failed');
     }
   }
 }

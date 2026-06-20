@@ -109,11 +109,37 @@ export interface ActionResult {
   error?: string;
 }
 
+export interface SuccessfulPattern {
+  id: string;
+  domain: string;
+  goal: string;
+  timestamp: string;
+  actions: Action[];
+}
+
+export interface FailurePattern {
+  id: string;
+  domain: string;
+  goal: string;
+  failedStep: number;
+  failedAction?: Action;
+  error: string;
+  timestamp: string;
+}
+
+export interface DomainMemory {
+  version: 1;
+  domain: string;
+  successfulPatterns: SuccessfulPattern[];
+  failures: FailurePattern[];
+}
+
 export interface PlanRequest {
   goal: string;
   url: string;
   elements: SemanticNode[];
   history: StepHistoryItem[];
+  relevantMemories?: DomainMemory | null;
 }
 
 export type RunnerStatus = 
@@ -141,7 +167,8 @@ export type ExecutionEventType =
   | 'NAVIGATION_DETECTED'
   | 'RUN_FINISHED'
   | 'RUN_ABORTED'
-  | 'RUN_RECORDED';
+  | 'RUN_RECORDED'
+  | 'MEMORY_CREATED';
 
 export interface ExecutionEvent {
   type: ExecutionEventType;
@@ -168,6 +195,7 @@ export interface RunnerState {
   startedAt?: string | null;  // ISO timestamp
   finishedAt?: string | null; // ISO timestamp
   history: HistoryItem[];
+  memories: DomainMemory[];
 }
 
 // Sidebar <-> Background

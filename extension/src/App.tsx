@@ -13,12 +13,14 @@ function App() {
     pageUrl: '',
     startedAt: null,
     finishedAt: null,
-    history: []
+    history: [],
+    memories: []
   });
 
   const [inputGoal, setInputGoal] = useState('');
-  const [activeTab, setActiveTab] = useState<'active' | 'history'>('active');
+  const [activeTab, setActiveTab] = useState<'active' | 'history' | 'memory'>('active');
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [selectedMemoryDomain, setSelectedMemoryDomain] = useState<string | null>(null);
   const [inspectorStepIndex, setInspectorStepIndex] = useState<number>(0);
 
   const portRef = useRef<chrome.runtime.Port | null>(null);
@@ -75,7 +77,7 @@ function App() {
     }
   };
 
-  const { status, plan, stepStatuses, stepResults, currentStepIndex, logs, pageTitle, pageUrl, startedAt, finishedAt } = runnerState;
+  const { status, plan, stepStatuses, stepResults, currentStepIndex, logs, pageTitle, pageUrl, startedAt, finishedAt, memories = [] } = runnerState;
 
   const isPlanning = status === 'parsing' || status === 'planning';
   const isExecuting = status === 'executing';
@@ -521,6 +523,175 @@ function App() {
     );
   };
 
+  const renderMemoryTab = () => {
+    const memoryList = memories || [];
+
+    if (selectedMemoryDomain) {
+      const domainMem = memoryList.find(m => m.domain.toLowerCase() === selectedMemoryDomain.toLowerCase());
+      const successfulPatterns = domainMem?.successfulPatterns || [];
+      const failures = domainMem?.failures || [];
+
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', animation: 'fadeIn 0.2s' }}>
+          {/* Back Button */}
+          <button
+            onClick={() => setSelectedMemoryDomain(null)}
+            className="interactive-btn"
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--accent-blue)',
+              cursor: 'pointer',
+              fontSize: '12px',
+              fontWeight: 500,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              padding: 0
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
+            </svg>
+            Back to Domains
+          </button>
+
+          <h2 style={{ margin: '4px 0 8px 0', fontSize: '15px', fontWeight: 700, color: 'var(--text-main)' }}>
+            {selectedMemoryDomain} Memory
+          </h2>
+
+          {/* Successful Patterns */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <span style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-muted)' }}>
+              Successful Patterns ({successfulPatterns.length})
+            </span>
+            {successfulPatterns.length === 0 ? (
+              <div className="glass-panel" style={{ padding: '12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>
+                No successful patterns recorded.
+              </div>
+            ) : (
+              successfulPatterns.map((p) => (
+                <div key={p.id} className="glass-panel" style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '6px' }}>
+                    <strong style={{ fontSize: '12px', color: 'var(--text-main)', wordBreak: 'break-word', flex: 1 }}>{p.goal}</strong>
+                    <span style={{ fontSize: '9px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                      {new Date(p.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                    </span>
+                  </div>
+                  <div style={{ borderTop: '1px solid var(--border)', paddingTop: '6px', marginTop: '2px' }}>
+                    <div style={{ fontSize: '10px', fontWeight: 600, color: 'var(--success)', marginBottom: '4px' }}>
+                      Action sequence:
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      {p.actions.map((act, i) => (
+                        <div key={i} style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: '11px', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                          <span style={{ color: 'var(--text-muted)' }}>{act.type}</span>
+                          {act.elementId && <span style={{ color: 'var(--accent-blue)' }}>[{act.elementId}]</span>}
+                          {act.value && <span style={{ color: 'var(--text-main)', opacity: 0.8 }}>"{act.value}"</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Failures */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '8px' }}>
+            <span style={{ fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-muted)' }}>
+              Failures ({failures.length})
+            </span>
+            {failures.length === 0 ? (
+              <div className="glass-panel" style={{ padding: '12px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px' }}>
+                No failures recorded.
+              </div>
+            ) : (
+              failures.map((f) => (
+                <div key={f.id} className="glass-panel" style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px', borderLeft: '3px solid var(--error)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '6px' }}>
+                    <strong style={{ fontSize: '12px', color: 'var(--text-main)', wordBreak: 'break-word', flex: 1 }}>{f.goal}</strong>
+                    <span style={{ fontSize: '9px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                      {new Date(f.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-main)', marginTop: '4px' }}>
+                    Failed at step {f.failedStep}:
+                  </div>
+                  {f.failedAction && (
+                    <div style={{
+                      fontFamily: "'JetBrains Mono', monospace",
+                      fontSize: '10px',
+                      background: 'rgba(0,0,0,0.2)',
+                      padding: '4px 6px',
+                      borderRadius: '4px',
+                      color: 'var(--text-muted)',
+                      wordBreak: 'break-all'
+                    }}>
+                      Failed Action: {f.failedAction.type} {f.failedAction.elementId ? `[${f.failedAction.elementId}]` : ''} {f.failedAction.value ? `"${f.failedAction.value}"` : ''}
+                    </div>
+                  )}
+                  <div style={{ fontSize: '11px', color: 'var(--error)', fontStyle: 'italic', wordBreak: 'break-word' }}>
+                    {f.error}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', animation: 'fadeIn 0.2s' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-muted)' }}>
+            Domain Memories
+          </span>
+        </div>
+
+        {memoryList.length === 0 ? (
+          <div className="glass-panel" style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)' }}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ opacity: 0.5, marginBottom: '8px', display: 'inline-block' }}>
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
+            <div style={{ fontSize: '13px' }}>No memories recorded yet.</div>
+            <div style={{ fontSize: '11px', marginTop: '4px', opacity: 0.8 }}>Flowly will learn from successful and failed runs.</div>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '420px', overflowY: 'auto' }}>
+            {memoryList.map((item) => (
+              <div
+                key={item.domain}
+                onClick={() => setSelectedMemoryDomain(item.domain)}
+                className="glass-panel interactive-btn"
+                style={{
+                  padding: '12px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  transition: 'all 0.2s',
+                  border: '1px solid var(--border)'
+                }}
+              >
+                <div>
+                  <strong style={{ fontSize: '13px', color: 'var(--text-main)' }}>{item.domain}</strong>
+                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    {item.successfulPatterns.length} successful, {item.failures.length} failures
+                  </div>
+                </div>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2.5">
+                  <polyline points="9 18 15 12 9 6"/>
+                </svg>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div style={{
       width: '360px',
@@ -632,6 +803,27 @@ function App() {
           }}
         >
           History ({runnerState.history?.length || 0})
+        </button>
+        <button
+          onClick={() => {
+            setActiveTab('memory');
+            setSelectedMemoryDomain(null);
+          }}
+          className="interactive-btn"
+          style={{
+            flex: 1,
+            background: activeTab === 'memory' ? 'var(--bg-card)' : 'none',
+            border: 'none',
+            color: activeTab === 'memory' ? 'var(--text-main)' : 'var(--text-muted)',
+            padding: '6px 12px',
+            borderRadius: '6px',
+            fontSize: '12px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'all 0.2s'
+          }}
+        >
+          Memory ({memories?.length || 0})
         </button>
       </div>
 
@@ -1092,8 +1284,10 @@ function App() {
             </div>
           </div>
         </>
-      ) : (
+      ) : activeTab === 'history' ? (
         selectedRunId && selectedRun ? renderRunDetail(selectedRun) : renderHistoryList()
+      ) : (
+        renderMemoryTab()
       )}
     </div>
   );

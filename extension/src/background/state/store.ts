@@ -1,4 +1,4 @@
-import { RunnerState, LogMessage, ExecutionEvent, RunnerStatus, StepStatus, SemanticNode, ActionResult, HistoryItem } from '@flowly/shared';
+import { RunnerState, LogMessage, ExecutionEvent, RunnerStatus, StepStatus, SemanticNode, ActionResult, HistoryItem, DomainMemory } from '@flowly/shared';
 
 let state: RunnerState = {
   goal: '',
@@ -12,7 +12,8 @@ let state: RunnerState = {
   pageUrl: '',
   startedAt: null,
   finishedAt: null,
-  history: []
+  history: [],
+  memories: []
 };
 
 type StateListener = (state: RunnerState) => void;

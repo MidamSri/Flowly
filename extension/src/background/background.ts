@@ -3,8 +3,13 @@ import * as store from './state/store';
 import { requestActionPlan } from './planner/plannerClient';
 import { executePlan } from './runner/runner';
 import { ContentRequest, ContentResponse } from '@flowly/shared';
+import { initMemoryStore } from './memory/memoryStore';
+import { getRelevantMemories } from './memory/memoryRetriever';
 
 console.log('Flowly Background Service Worker Active.');
+
+// Initialize memory store on startup
+initMemoryStore();
 
 // Listen for connections from Sidebar UI
 chrome.runtime.onConnect.addListener(handleSidebarConnection);
@@ -71,7 +76,13 @@ registerActionHandlers({
         store.addLog('info', 'Querying local planner server (Fastify)...');
 
         try {
-          const plan = await requestActionPlan(goal, response.url, response.nodes, []);
+          const domain = new URL(response.url).hostname || 'unknown';
+          const relevantMemories = getRelevantMemories(domain);
+          if (relevantMemories && (relevantMemories.successfulPatterns.length > 0 || relevantMemories.failures.length > 0)) {
+            store.addLog('info', `Retrieved relevant memories for domain ${domain} (${relevantMemories.successfulPatterns.length} success patterns, ${relevantMemories.failures.length} failures).`);
+          }
+
+          const plan = await requestActionPlan(goal, response.url, response.nodes, [], relevantMemories);
           
           store.updateState({
             status: 'waiting_approval',

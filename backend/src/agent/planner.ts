@@ -16,6 +16,10 @@ Your goal is to execute the user's instructions on the current page.
 5. If the goal is fully achieved on the current page, return empty steps and set isGoalAchieved = true.
 6. The elements on the current page are formatted in an indented tree where each element is prefixed by its ID, like [el-15] Type name. You MUST reference this ID exactly as elementId in your click or type actions.
 7. Avoid infinite loops. If you have run the same action multiple times and the page state is not changing, either try a different approach or lower your confidence to indicate you need assistance.
+8. If previous successful patterns or failures (memories) are provided:
+   - Treat them as hints/examples from previous runs, NOT as hard constraints.
+   - You may reuse successful sequences if they are appropriate for the current page state and goal.
+   - Avoid repeating known failures or repeating actions that resulted in errors.
 
 ### Available Actions:
 - click: Click an element. Requires elementId. Use for buttons, interactive links, checkboxes, or text fields to focus them.
@@ -138,9 +142,42 @@ export async function generateActionPlan(
     ? request.history.map((h, i) => `${i + 1}. Action: ${h.action} | Status: ${h.status}${h.error ? ` | Error: ${h.error}` : ''}`).join('\n')
     : 'No actions have been executed yet.';
 
+  let memoriesText = '';
+  if (request.relevantMemories) {
+    const { successfulPatterns = [], failures = [] } = request.relevantMemories;
+    const limitedSuccessful = successfulPatterns.slice(0, 5);
+    const limitedFailures = failures.slice(0, 3);
+
+    if (limitedSuccessful.length > 0 || limitedFailures.length > 0) {
+      memoriesText = `### Relevant Memories for Domain: ${request.relevantMemories.domain}\n`;
+      memoriesText += `These memories are examples from previous runs on this domain. Treat them as hints, not hard constraints. You may reuse successful sequences if appropriate. Avoid repeating known failures.\n`;
+
+      if (limitedSuccessful.length > 0) {
+        memoriesText += `\nSuccessful workflows on this website in the past (up to 5):\n`;
+        limitedSuccessful.forEach((p, idx) => {
+          memoriesText += `${idx + 1}. Goal: "${p.goal}"\n   Action sequence:\n`;
+          p.actions.forEach((s) => {
+            memoriesText += `     - Type: ${s.type}${s.elementId ? `, elementId: ${s.elementId}` : ''}${s.value ? `, value: "${s.value}"` : ''}\n`;
+          });
+        });
+      }
+
+      if (limitedFailures.length > 0) {
+        memoriesText += `\nUnsuccessful workflows / errors on this website in the past (up to 3):\n`;
+        limitedFailures.forEach((f, idx) => {
+          memoriesText += `${idx + 1}. Goal: "${f.goal}" | Failed at step: ${f.failedStep}\n`;
+          if (f.failedAction) {
+            memoriesText += `   Failed Action: Type: ${f.failedAction.type}${f.failedAction.elementId ? `, elementId: ${f.failedAction.elementId}` : ''}${f.failedAction.value ? `, value: "${f.failedAction.value}"` : ''}\n`;
+          }
+          memoriesText += `   Error: "${f.error}"\n`;
+        });
+      }
+    }
+  }
+
   const userPrompt = `### Goal
 Goal: ${request.goal}
-
+${memoriesText ? `\n${memoriesText}` : ''}
 ### Execution History
 ${historyText}
 

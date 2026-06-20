@@ -49,6 +49,9 @@ export const eventBus = {
       case 'RUN_RECORDED':
         logMsg = `Run recorded in execution history.`;
         break;
+      case 'MEMORY_CREATED':
+        logMsg = `Memory created: ${payload.message || 'Stored experience'}`;
+        break;
     }
 
     if (logMsg) {

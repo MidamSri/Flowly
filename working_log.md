@@ -360,5 +360,160 @@ extension/src/background/runner/
    ✅ Extension loaded and successfully parsed the page!
    ```
 
+---
 
+## 9. Phase 5 (Timeline, Replay & Execution History)
 
+The objective of Phase 5 was to transform Flowly into an observable system by introducing execution history tracking, trace serialization exports, and a step-by-step observational inspection workflow.
+
+### A. Repository & Directory Structure Additions
+We introduced the `timeline` module inside the background service worker folder:
+```text
+extension/src/background/timeline/
+├── historyManager.ts       # [NEW] Coordinates completed run recording & trace serialization
+└── replayBuilder.ts        # [NEW] Maps ActionPlans and ActionResults to ReplayTimelineItems
+```
+
+### B. Component Details & Code Mechanics
+
+1. **Shared Types Separation (`shared/src/types.ts`)**:
+   - Renamed the internal loop execution history item type to `StepHistoryItem` (used in `PlanRequest`) to avoid namespace conflicts.
+   - Defined `ReplayTimelineItem` representing the timeline step schema: `stepIndex`, action type (`click`, `type`, etc.), visual parameters, execution status, step duration, scraped accessibility node parameters, URL changes, and error information.
+   - Defined `HistoryItem` representing a completed execution run: goal, timestamps (`startedAt`, `finishedAt`), total execution duration (`durationMs`), status (`success` | `failed` | `aborted`), target tab domain, `ActionPlan`, `ActionResult[]` collection, and the compiled `timeline` array.
+   - Expanded `RunnerState` to hold `history: HistoryItem[]`.
+   - Added `'RUN_RECORDED'` to `ExecutionEventType` and `'CLEAR_HISTORY'` to `SidebarRequest`.
+
+2. **Decoupled Timeline Builder (`background/timeline/replayBuilder.ts`)**:
+   - Maps static plan actions and dynamic step outcomes to a list of `ReplayTimelineItem`s.
+   - Avoids coupling front-end timeline render components directly to background execution loops.
+   - Handles steps not reached during failures/cancellations by formatting them as `executed: false`.
+
+3. **History Manager & Trace Serialization (`background/timeline/historyManager.ts`)**:
+   - Synthesizes finished runs from final state variables, calculates durations, and assigns unique trace identifiers.
+   - Formats trace records for JSON exports with rich metadata for compatibility:
+     ```json
+     {
+       "version": 1,
+       "id": "run-uuid-...",
+       "goal": "...",
+       "status": "success",
+       "startedAt": "...",
+       "finishedAt": "...",
+       "durationMs": 5200,
+       "pageUrl": "...",
+       "pageTitle": "...",
+       "plan": { ... },
+       "stepResults": [ ... ],
+       "timeline": [ ... ]
+     }
+     ```
+
+4. **Bounded State Storage and Persistence (`background/state/store.ts`)**:
+   - Maintained in-memory execution history within the reactive runner state, preserving history arrays during regular worker resets.
+   - Implemented `addHistoryItem` keeping only the latest 50 runs (bounded history) and saving records to Chrome local storage (`chrome.storage.local`) to survive worker sleep cycles.
+   - Implemented `clearHistory` triggered from sidebar messages.
+   - Automated loading of historical runs on service worker startup.
+
+5. **Automatic Recording Triggers (`background/runner/executePlan.ts`)**:
+   - Appends run traces to storage automatically in execution success, failure, and cancellation branches.
+   - Emits `'RUN_RECORDED'` events to log history entries directly on the console monitor.
+
+6. **Tabbed Sidebar UI & Timeline Inspector (`extension/src/App.tsx`)**:
+   - Built a sleek, glassmorphic Tab Switcher separating the **Active Run** panel and the **History** workspace.
+   - **History Panel**: Displays chronologically sorted runs detailing status symbols (✓, ✗, ⊘), goals, domains, duration metrics, and start times. Features a "Clear All" button.
+   - **Run Detail Viewer**: Displays a concise card summarizing metadata and features a direct blob-triggered **Export Trace** download.
+   - **Timeline Inspector (observational only)**:
+     - Includes sequential "Previous Step" / "Next Step" controls to inspect action properties step-by-step.
+     - Renders horizontal numeric dot timeline trackers for quick jumps.
+     - Displays action reasonings, target element classes/texts/roles, step execution speeds, url transitions, and error logs.
+
+### C. Verification Results
+
+1. **Compilation Build**:
+   ```bash
+   $ pnpm --filter @flowly/extension build
+   $ tsc && vite build
+   ✓ 52 modules transformed.
+   dist/background.js   13.95 kB
+   dist/popup.js       170.50 kB
+   ✓ built in 245ms
+   ```
+
+2. **Parser Unit Verification**:
+   ```bash
+   $ pnpm --filter @flowly/backend test
+   🧪 Running Semantic Node Parser unit test...
+   ✅ Unit Test Passed: Semantic tree correctly pruned and structured!
+   ```---
+
+## 10. Phase 6 (Structured Memory)
+
+The objective of Phase 6 was to introduce a deterministic, lightweight, and interpretable memory layer for Flowly, allowing the browser control agent to extract, store, and retrieve successful action sequences and failure patterns to optimize planning on subsequent executions.
+
+### A. Repository & Directory Structure Additions
+We introduced the memory module inside the background service worker folder:
+```text
+extension/src/background/memory/
+├── models/
+│   ├── SuccessfulPattern.ts  # [NEW] Builder helper for successful patterns
+│   └── FailurePattern.ts     # [NEW] Builder helper for failure patterns
+├── serializers/
+│   └── domainMemory.ts       # [NEW] Version 1 schema serialization & migration
+├── deduplicator.ts           # [NEW] Goal/action-based hashing & recency reinforcement
+├── memoryStore.ts            # [NEW] Bounded persistence via chrome.storage.local
+├── memoryExtractor.ts        # [NEW] Hooks completed runs to extract memory blocks
+└── memoryRetriever.ts        # [NEW] Domain-based recency retrieval
+```
+
+### B. Component Details & Code Mechanics
+
+1. **Shared Types Integration (`shared/src/types.ts`)**:
+   - Defined `SuccessfulPattern`: stores `id`, `domain`, `goal`, `timestamp`, and the actual executed `actions` sequence.
+   - Defined `FailurePattern`: stores `id`, `domain`, `goal`, `failedStep`, `failedAction` (optional), `error` message, and `timestamp`.
+   - Defined `DomainMemory`: stores versioning flag (`version: 1`), `domain`, `successfulPatterns`, and `failures`.
+   - Expanded `RunnerState` to hold `memories: DomainMemory[]`.
+   - Expanded `PlanRequest` to pass `relevantMemories?: DomainMemory | null` payload.
+   - Expanded `ExecutionEventType` to include `'MEMORY_CREATED'`.
+
+2. **Deduplication and Recency Strengthening (`deduplicator.ts`)**:
+   - Implements pattern hashing: Goal + Actions sequence (for success) and Goal + FailedStep + Error (for failures).
+   - Prevents duplicate pattern database inserts; if a duplicate pattern matches, it updates its timestamp and shifts it to the front of the list, strengthening the memory.
+
+3. **Pruning and Persistence Store (`memoryStore.ts`)**:
+   - Restricts database growth to a maximum of 10 patterns per domain and 50 domains in total.
+   - Triggers domain sorting based on the latest activity timestamp to drop the oldest domain memory if limits are exceeded.
+   - Syncs memory lists with the react state machine and persists updates using `chrome.storage.local`.
+
+4. **Planner Context Augmentation (`planner.ts`)**:
+   - Instructs the planner server `/api/plan` endpoint to augment prompts with domain memories.
+   - Restricts memory inserts to the latest 5 successful workflows and the latest 3 failures.
+   - Instructs Gemini via `SYSTEM_INSTRUCTION` constraints to treat memories as hints (not hard constraints), reuse successful actions if appropriate, and avoid repeating failures.
+
+5. **Tabbed Sidebar UI & Memory Detail View (`App.tsx`)**:
+   - Added a **Memory** tab panel displaying domain lists with quick metrics (e.g. `reddit.com (2 successful, 1 failures)`).
+   - Supports deep drill-down showing action sequences (`click`, `type`, etc.) for success patterns, or `Failed at step X: error` alerts for failures.
+
+### C. Verification Results
+
+1. **Compilation Build**:
+   ```bash
+   $ pnpm build
+   ✓ 59 modules transformed.
+   dist/background.js   18.27 kB
+   dist/popup.js       177.06 kB
+   ✅ Build succeeded without compile errors!
+   ```
+
+2. **Subsystem Unit Verification**:
+   Added E2E tests for memory core deduplication, hashing, and serializers under `backend/src/test_memory.ts`:
+   ```bash
+   $ pnpm test
+   🧪 Running Semantic Node Parser unit test...
+   ✅ Unit Test Passed: Semantic tree correctly pruned and structured!
+   🧪 Running Memory Subsystem Unit Tests...
+   ✅ Hashing normalization passed.
+   ✅ Successful pattern deduplication (recency strengthening) passed.
+   ✅ Failure pattern deduplication passed.
+   ✅ Serialization & version schema migration passed.
+   🎉 All Memory Subsystem Unit Tests Passed Successfully!
+   ```
