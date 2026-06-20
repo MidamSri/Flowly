@@ -49,10 +49,42 @@ export interface ActionPlan {
   isGoalAchieved: boolean;  // True if goal is met
 }
 
-export interface HistoryItem {
+export interface StepHistoryItem {
   action: string;           // Description of action run
   status: 'success' | 'failed';
   error?: string;
+}
+
+export interface ReplayTimelineItem {
+  stepIndex: number;
+  type: string;             // Action step type ('click' | 'type' | 'scroll' | 'wait' | 'navigate')
+  elementId?: string;
+  value?: string;
+  reasoning: string;
+  executed: boolean;
+  success?: boolean;
+  durationMs?: number;
+  error?: string;
+  nodeRole?: string;
+  nodeText?: string;
+  beforeUrl?: string;
+  afterUrl?: string;
+  beforeTitle?: string;
+  afterTitle?: string;
+}
+
+export interface HistoryItem {
+  id: string;
+  goal: string;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  status: 'success' | 'failed' | 'aborted';
+  pageTitle?: string;
+  pageUrl?: string;
+  plan: ActionPlan;
+  stepResults: ActionResult[];
+  timeline: ReplayTimelineItem[];
 }
 
 export interface ViewportData {
@@ -81,7 +113,7 @@ export interface PlanRequest {
   goal: string;
   url: string;
   elements: SemanticNode[];
-  history: HistoryItem[];
+  history: StepHistoryItem[];
 }
 
 export type RunnerStatus = 
@@ -108,7 +140,8 @@ export type ExecutionEventType =
   | 'STEP_FAILED'
   | 'NAVIGATION_DETECTED'
   | 'RUN_FINISHED'
-  | 'RUN_ABORTED';
+  | 'RUN_ABORTED'
+  | 'RUN_RECORDED';
 
 export interface ExecutionEvent {
   type: ExecutionEventType;
@@ -134,6 +167,7 @@ export interface RunnerState {
   pageUrl?: string;
   startedAt?: string | null;  // ISO timestamp
   finishedAt?: string | null; // ISO timestamp
+  history: HistoryItem[];
 }
 
 // Sidebar <-> Background
@@ -141,7 +175,8 @@ export type SidebarRequest =
   | { type: 'GET_STATE' }
   | { type: 'GENERATE_PLAN'; goal: string }
   | { type: 'APPROVE_RUN' }
-  | { type: 'CANCEL_RUN' };
+  | { type: 'CANCEL_RUN' }
+  | { type: 'CLEAR_HISTORY' };
 
 export type SidebarResponse =
   | { type: 'STATE_SYNC'; state: RunnerState }

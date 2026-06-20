@@ -1,6 +1,7 @@
 import { executeStep } from './executeStep';
 import { eventBus } from './eventBus';
 import * as store from '../state/store';
+import { createHistoryItem } from '../timeline/historyManager';
 
 /**
  * Runs the sequence of steps in the action plan.
@@ -107,6 +108,10 @@ export async function executePlan(tabId: number, signal: AbortSignal): Promise<v
       message: 'Action plan completed successfully.'
     });
 
+    const historyItem = createHistoryItem(store.getState(), 'success');
+    store.addHistoryItem(historyItem);
+    eventBus.emit('RUN_RECORDED');
+
   } catch (err: any) {
     const isAbort = err.name === 'AbortError' || signal.aborted;
 
@@ -124,6 +129,10 @@ export async function executePlan(tabId: number, signal: AbortSignal): Promise<v
       });
 
       eventBus.emit('RUN_ABORTED');
+
+      const historyItem = createHistoryItem(store.getState(), 'aborted');
+      store.addHistoryItem(historyItem);
+      eventBus.emit('RUN_RECORDED');
     } else {
       store.updateState({
         status: 'failed',
@@ -133,6 +142,10 @@ export async function executePlan(tabId: number, signal: AbortSignal): Promise<v
       eventBus.emit('RUN_FINISHED', {
         error: err.message || String(err)
       });
+
+      const historyItem = createHistoryItem(store.getState(), 'failed');
+      store.addHistoryItem(historyItem);
+      eventBus.emit('RUN_RECORDED');
     }
   }
 }

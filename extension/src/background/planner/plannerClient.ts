@@ -1,4 +1,4 @@
-import { PlanRequest, ActionPlan, SemanticNode, HistoryItem } from '@flowly/shared';
+import { PlanRequest, ActionPlan, SemanticNode, StepHistoryItem } from '@flowly/shared';
 
 /**
  * Communicates with the local planner Fastify server to generate plans.
@@ -7,7 +7,7 @@ export async function requestActionPlan(
   goal: string,
   url: string,
   elements: SemanticNode[],
-  history: HistoryItem[]
+  history: StepHistoryItem[]
 ): Promise<ActionPlan> {
   const payload: PlanRequest = {
     goal,

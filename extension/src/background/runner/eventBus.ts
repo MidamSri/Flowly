@@ -46,6 +46,9 @@ export const eventBus = {
         logMsg = `Execution aborted by user.`;
         logLevel = 'warn';
         break;
+      case 'RUN_RECORDED':
+        logMsg = `Run recorded in execution history.`;
+        break;
     }
 
     if (logMsg) {

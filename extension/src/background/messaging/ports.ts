@@ -89,6 +89,9 @@ export function handleSidebarConnection(port: chrome.runtime.Port): void {
       case 'CANCEL_RUN':
         handlers.onCancelRun();
         break;
+      case 'CLEAR_HISTORY':
+        store.clearHistory();
+        break;
     }
   });
 }

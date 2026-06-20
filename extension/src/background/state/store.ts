@@ -1,4 +1,4 @@
-import { RunnerState, LogMessage, ExecutionEvent, RunnerStatus, StepStatus, SemanticNode, ActionResult } from '@flowly/shared';
+import { RunnerState, LogMessage, ExecutionEvent, RunnerStatus, StepStatus, SemanticNode, ActionResult, HistoryItem } from '@flowly/shared';
 
 let state: RunnerState = {
   goal: '',
@@ -11,7 +11,8 @@ let state: RunnerState = {
   pageTitle: '',
   pageUrl: '',
   startedAt: null,
-  finishedAt: null
+  finishedAt: null,
+  history: []
 };
 
 type StateListener = (state: RunnerState) => void;
@@ -45,6 +46,7 @@ export function emitExecutionEvent(event: ExecutionEvent): void {
 
 export function resetState(): void {
   state = {
+    ...state,
     goal: '',
     status: 'idle',
     plan: null,
@@ -96,5 +98,52 @@ export function getLastParsedNodes(): SemanticNode[] {
 export function addStepResult(result: ActionResult): void {
   state.stepResults = [...(state.stepResults || []), result];
   stateListeners.forEach(listener => listener(state));
+}
+
+export function addHistoryItem(item: HistoryItem): void {
+  const updatedHistory = [item, ...(state.history || [])].slice(0, 50);
+  state.history = updatedHistory;
+
+  if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+    chrome.storage.local.set({ flowly_history: updatedHistory }, () => {
+      if (chrome.runtime.lastError) {
+        console.error('Error saving history to chrome.storage.local:', chrome.runtime.lastError);
+      }
+    });
+  }
+
+  stateListeners.forEach(listener => listener(state));
+}
+
+export function getHistory(): HistoryItem[] {
+  return state.history || [];
+}
+
+export function clearHistory(): void {
+  state.history = [];
+
+  if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+    chrome.storage.local.set({ flowly_history: [] }, () => {
+      if (chrome.runtime.lastError) {
+        console.error('Error clearing history in chrome.storage.local:', chrome.runtime.lastError);
+      }
+    });
+  }
+
+  stateListeners.forEach(listener => listener(state));
+}
+
+// Load initial history from chrome.storage.local
+if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+  chrome.storage.local.get(['flowly_history'], (result) => {
+    if (chrome.runtime.lastError) {
+      console.error('Error loading history from chrome.storage.local:', chrome.runtime.lastError);
+      return;
+    }
+    if (result && result.flowly_history) {
+      state.history = result.flowly_history;
+      stateListeners.forEach(listener => listener(state));
+    }
+  });
 }
 

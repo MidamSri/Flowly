@@ -1,6 +1,6 @@
 import { chromium, Page } from 'playwright';
 import { spawn, ChildProcess } from 'child_process';
-import { SemanticNode, PageState, PlanRequest, ActionPlan, HistoryItem } from '@flowly/shared';
+import { SemanticNode, PageState, PlanRequest, ActionPlan, StepHistoryItem } from '@flowly/shared';
 
 // 1. Simple CLI Argument Parser
 const args = process.argv.slice(2);
@@ -212,7 +212,7 @@ async function run() {
   // Set up navigations with standard timeouts
   await page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
   
-  const history: HistoryItem[] = [];
+  const history: StepHistoryItem[] = [];
   const maxIterations = 10;
   let success = false;
 
