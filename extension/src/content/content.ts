@@ -1,21 +1,94 @@
 import { buildAccessibilityTree } from './parser/accessibilityTree';
+import { click, type, scroll, wait } from './executor/elementActions';
+import { ContentRequest, ContentResponse } from '@flowly/shared';
 
-console.log('%c[Flowly] Perception Layer Content Script Loaded', 'color: #6366f1; font-weight: bold; font-size: 14px;');
+console.log('%c[Flowly] Perception Layer Content Script Loaded & Listening', 'color: #6366f1; font-weight: bold; font-size: 14px;');
 
+// Run initial perception parse for developer visibility and test automation compatibility
 try {
-  // Execute the semantic accessibility tree extraction
-  const semanticNodes = buildAccessibilityTree();
-
-  // Print a formatted, readable semantic list
-  let output = '\nFLOWLY PARSER\n\n';
-  semanticNodes.forEach((node, index) => {
-    const typePadded = node.type.padEnd(10);
-    const displayName = node.text || node.ariaLabel || node.placeholder || `<${node.id}>`;
-    output += `[${index}] ${typePadded} "${displayName}"\n`;
-  });
-
-  console.log(output);
-  console.log('[Flowly] Extracted Semantic Nodes Array:', semanticNodes);
-} catch (error) {
-  console.error('[Flowly] Parser Execution Failed:', error);
+  const initialNodes = buildAccessibilityTree();
+  console.log(`[Flowly] Bootstrapped perception layer. Scraped ${initialNodes.length} nodes on startup.`);
+} catch (err) {
+  console.error('[Flowly] Startup perception scrape failed:', err);
 }
+
+chrome.runtime.onMessage.addListener((request: ContentRequest, sender, sendResponse) => {
+  console.log('[Flowly Content] Received request:', request);
+
+  if (request.type === 'PARSE_PAGE_REQUEST') {
+    try {
+      const nodes = buildAccessibilityTree();
+      const response: ContentResponse = {
+        type: 'PARSE_PAGE_RESPONSE',
+        success: true,
+        nodes,
+        url: window.location.href,
+        title: document.title
+      };
+      sendResponse(response);
+    } catch (error: any) {
+      const response: ContentResponse = {
+        type: 'PARSE_PAGE_RESPONSE',
+        success: false,
+        nodes: [],
+        url: window.location.href,
+        title: document.title,
+        error: error.message || String(error)
+      };
+      sendResponse(response);
+    }
+    return true; // Keep message channel open for async response
+  }
+
+  if (request.type === 'EXECUTE_ACTION_REQUEST') {
+    const action = request.action;
+    (async () => {
+      try {
+        switch (action.type) {
+          case 'click':
+            if (!action.elementId) {
+              throw new Error('elementId is required for click action');
+            }
+            await click(action.elementId);
+            break;
+          case 'type':
+            if (!action.elementId) {
+              throw new Error('elementId is required for type action');
+            }
+            await type(action.elementId, action.value || '', action);
+            break;
+          case 'scroll':
+            const dir = action.value === 'up' ? 'up' : 'down';
+            await scroll(dir);
+            break;
+          case 'wait':
+            await wait(action.waitMs || 1000);
+            break;
+          case 'navigate':
+            if (!action.value) {
+              throw new Error('value (URL) is required for navigate action');
+            }
+            window.location.href = action.value;
+            break;
+          default:
+            throw new Error(`Unsupported action type: ${(action as any).type}`);
+        }
+        
+        const response: ContentResponse = {
+          type: 'EXECUTE_ACTION_RESPONSE',
+          success: true
+        };
+        sendResponse(response);
+      } catch (error: any) {
+        console.error('[Flowly Content] Action execution failed:', error);
+        const response: ContentResponse = {
+          type: 'EXECUTE_ACTION_RESPONSE',
+          success: false,
+          error: error.message || String(error)
+        };
+        sendResponse(response);
+      }
+    })();
+    return true; // Keep message channel open for async response
+  }
+});

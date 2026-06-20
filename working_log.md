@@ -218,3 +218,83 @@ To verify the extension perception pipeline automatically, we added a Playwright
   ```
 - **Results**: Verified that element state mutations (`data-flowly-id="flowly-node-*"`) and accessibility state parsers operate with 100% accuracy and zero compilation errors.
 
+---
+
+## 7. Phase 3 (Architectural Revisions: Type-Safe Communication & Control Layer)
+
+The objective of Phase 3 was to establish the communication layer between the Sidebar UI, Background Service Worker, and Content Script using typed message contracts and persistent ports, while maintaining strict separation of responsibilities, human-in-the-loop approval, and sequential execution.
+
+### A. Repository & Directory Structure Additions
+We expanded the `@flowly/extension` package with modular files and structured directories:
+```text
+extension/
+└── src/
+    ├── App.tsx                   # Observability Control panel (Sidebar UI)
+    ├── index.css                 # Premium Outfit & JetBrains Mono HSL styling tokens
+    ├── content/
+    │   ├── content.ts            # Short-lived message-passing entrypoint
+    │   └── executor/
+    │       └── elementActions.ts # [NEW] click, type, scroll, wait DOM interactors
+    └── background/
+        ├── background.ts         # Central entrypoint coordinating components
+        ├── messaging/
+        │   └── ports.ts          # [NEW] Sidebar persistent port management
+        ├── planner/
+        │   └── plannerClient.ts  # [NEW] Local planner server fetch transport
+        ├── runner/
+        │   └── runner.ts         # [NEW] Sequential step loop orchestrator
+        └── state/
+            └── store.ts          # [NEW] In-memory RunnerState store with subscriptions
+```
+
+### B. Component Details & Code Mechanics
+
+1. **Shared Message Contracts (`shared/src/types.ts`)**:
+   Introduced typed messages for boundaries:
+   - `RunnerState`: Tracks `goal`, `status` (`idle`, `parsing`, `planning`, `waiting_approval`, `executing`, `success`, `failed`), `plan`, `currentStepIndex`, `stepStatuses`, `logs`, `pageTitle`, `pageUrl`, and ISO timestamps (`startedAt`, `finishedAt`).
+   - `ExecutionEvent`: Separate event stream containing `RUN_STARTED`, `STEP_STARTED`, `STEP_COMPLETED`, `STEP_FAILED`, `RUN_FINISHED`, and `RUN_ABORTED`.
+   - `SidebarRequest`/`SidebarResponse` and `ContentRequest`/`ContentResponse` for type-safe message passing.
+
+2. **Lightweight Element Actions (`extension/src/content/executor/elementActions.ts`)**:
+   Provides execution wrappers looking up targets exclusively by their namespace identifier (`data-flowly-id`):
+   - `click()`: Scrolls element into viewport, sets focus, and triggers standard click handler + bubble MouseEvents.
+   - `type()`: Focuses input/textarea, assigns value through native descriptor setters to bypass framework shadow bindings (React/Vue), dispatches `input` and `change` events, and emulates Enter-presses when reasoning calls for searches.
+   - `scroll()`: Performs smooth page/window offsets.
+   - `wait()`: Executes asynchronous pauses.
+
+3. **Short-Lived Content Script Messaging (`extension/src/content/content.ts`)**:
+   Swapped persistent ports for temporary message handlers (`chrome.runtime.onMessage.addListener`). Initiates a passive perception tree-build on script inject for visual console logging, then waits to process background requests (`PARSE_PAGE_REQUEST`, `EXECUTE_ACTION_REQUEST`).
+
+4. **Modular Background service worker**:
+   - **State Manager (`store.ts`)**: Serves as the source of truth, storing state and execution logs in memory. Exposes event listener callbacks to alert ports on state mutations.
+   - **Sidebar Communication (`ports.ts`)**: Manages persistent sidebar ports (`flowly-sidebar`), syncing state on connection to support sidebar reopen/reconnects without loss of data.
+   - **Planner Client (`plannerClient.ts`)**: Formulates requests and transfers page context to the Fastify backend server.
+   - **Step Orchestration (`runner.ts`)**: Evaluates steps sequentially. Monitors an `AbortSignal` for cancellation, queries tabs for updated titles/URLs, and generates verbose logs with clean node descriptors (e.g. `Clicked button "Search" (flowly-node-24)`).
+   - **Main Entrypoint (`background.ts`)**: Binds events and state store commands. Controls the lifetime of `AbortController` instances when cancellation is triggered.
+
+5. **Observability Sidebar UI (`extension/src/App.tsx`, `extension/src/index.css`)**:
+   Constructed a glassmorphic dashboard panel utilising HSL themes and modern fonts (Outfit/JetBrains Mono):
+   - **Goal Console**: Text area for user goal input.
+   - **Proposed steps & Confidence Gauge**: Interactive sequencer mapping step phases (pending, running, success, failed) alongside confidence indicator ratings.
+   - **Live Logs Console**: Monospaced terminal window showing real-time timestamps and execution details.
+   - **Approval & Cancellation buttons**: Controls mapping approved executions or immediate AbortController cancellations.
+
+### C. Verification Results
+
+1. **Monorepo Build**: Verified that pnpm workspace builds without errors:
+   ```bash
+   $ pnpm build
+   Scope: 3 of 4 workspace projects
+   backend build: Done
+   extension build: dist/content.js (5.74 kB), dist/background.js (7.91 kB), dist/popup.js (155.23 kB)
+   extension build: Done
+   ```
+
+2. **Automated Testing**: Verified the perception crawler on Wikipedia:
+   ```bash
+   $ pnpm --filter @flowly/backend test:extension
+   Detected flowly ID attribute in DOM: { id: 'flowly-node-0', tag: 'A', text: 'Jump to content' }
+   ✅ Extension loaded and successfully parsed the page!
+   ```
+
+

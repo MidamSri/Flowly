@@ -61,3 +61,71 @@ export interface PlanRequest {
   elements: SemanticNode[];
   history: HistoryItem[];
 }
+
+export type RunnerStatus = 
+  | 'idle'
+  | 'parsing'
+  | 'planning'
+  | 'waiting_approval'
+  | 'executing'
+  | 'success'
+  | 'failed';
+
+export type StepStatus = 'pending' | 'running' | 'success' | 'failed';
+
+export interface LogMessage {
+  timestamp: string;
+  level: 'info' | 'warn' | 'error';
+  message: string;
+}
+
+export type ExecutionEventType = 
+  | 'RUN_STARTED'
+  | 'STEP_STARTED'
+  | 'STEP_COMPLETED'
+  | 'STEP_FAILED'
+  | 'RUN_FINISHED'
+  | 'RUN_ABORTED';
+
+export interface ExecutionEvent {
+  type: ExecutionEventType;
+  timestamp: string;
+  stepIndex?: number;
+  message?: string;
+  error?: string;
+}
+
+export interface RunnerState {
+  goal: string;
+  status: RunnerStatus;
+  plan: ActionPlan | null;
+  currentStepIndex: number | null;
+  stepStatuses: StepStatus[];
+  logs: LogMessage[];
+  pageTitle?: string;
+  pageUrl?: string;
+  startedAt?: string | null;  // ISO timestamp
+  finishedAt?: string | null; // ISO timestamp
+}
+
+// Sidebar <-> Background
+export type SidebarRequest =
+  | { type: 'GET_STATE' }
+  | { type: 'GENERATE_PLAN'; goal: string }
+  | { type: 'APPROVE_RUN' }
+  | { type: 'CANCEL_RUN' };
+
+export type SidebarResponse =
+  | { type: 'STATE_SYNC'; state: RunnerState }
+  | { type: 'EXECUTION_EVENT'; event: ExecutionEvent }
+  | { type: 'LOG_MESSAGE'; log: LogMessage };
+
+// Background <-> Content Script (Message Passing)
+export type ContentRequest =
+  | { type: 'PARSE_PAGE_REQUEST' }
+  | { type: 'EXECUTE_ACTION_REQUEST'; action: Action };
+
+export type ContentResponse =
+  | { type: 'PARSE_PAGE_RESPONSE'; success: boolean; nodes: SemanticNode[]; url: string; title: string; error?: string }
+  | { type: 'EXECUTE_ACTION_RESPONSE'; success: boolean; error?: string };
+
