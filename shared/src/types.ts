@@ -1,15 +1,17 @@
 export type SemanticNodeType = 'button' | 'link' | 'textbox' | 'checkbox' | 'dropdown' | 'container' | 'text';
 
 export interface SemanticNode {
-  id: string;             // Ephemeral ID generated per page load (e.g., "el-24")
+  id: string;             // Ephemeral ID generated per page load (e.g., "flowly-node-24")
   type: SemanticNodeType;
   text: string;           // Visible text content
   placeholder?: string;   // Input placeholder
   ariaLabel?: string;     // Accessibility labels
   disabled: boolean;      // Interactive status
   checked?: boolean;      // Checkboxes/radios
+  expanded?: boolean;     // Expanded status (e.g. aria-expanded)
+  selected?: boolean;     // Selected status (e.g. aria-selected, tab selected)
   parentId?: string;      // ID of logical container (e.g., card)
-  selector?: string;      // CSS selector / locator used by content script/Playwright
+  selector?: string;      // Optional/debug selector
   rect?: {                // Viewport position/dimension
     x: number;
     y: number;

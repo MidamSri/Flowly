@@ -152,3 +152,69 @@ Current URL: https://www.reddit.com/
 🎉 [Success] Planner indicates the goal has been fully met!
 ⭐ E2E Execution Succeeded!
 ```
+
+---
+
+## 6. Phase 2 (Chrome Extension Boilerplate & DOM Parser)
+
+The objective of Phase 2 was to set up a Manifest V3 Chrome Extension workspace using Vite, React, and TypeScript, and design a highly modular, decoupled **Perception Layer** to scan, parse, and structure dynamic page contents as a pruned semantic accessibility tree without loading full, heavy DOM structures.
+
+### A. Repository & Directory Structure Additions
+We added the `@flowly/extension` package to the workspaces:
+```text
+extension/
+├── package.json                # React, Vite, TS dependencies & build scripts
+├── tsconfig.json               # Config targeting ES2022 & browser DOM
+├── vite.config.ts              # Config compiling unchunked popup, content & background scripts
+├── index.html                  # Popup mount HTML
+├── public/
+│   └── manifest.json           # Manifest V3 (activeTab, scripting permissions)
+└── src/
+    ├── main.tsx                # React app entry point
+    ├── App.tsx                 # Basic layout popup panel
+    ├── index.css               # Styling rules
+    ├── background/
+    │   └── background.ts       # Minimal service worker placeholder
+    └── content/
+        ├── content.ts          # Entry content script automatically running at document_idle
+        └── parser/             # Decoupled Perception Engine
+            ├── idGenerator.ts  # Stateful namespaced ID tracker
+            ├── visibility.ts   # Checks bounding boxes and computed styles
+            ├── roles.ts        # Maps tags, types, and custom cursor pointer styles to SemanticNodeTypes
+            ├── extractText.ts  # Clean text nodes & interactive text limits
+            ├── nodeFactory.ts  # Maps DOM nodes to rich SemanticNode interfaces
+            └── accessibilityTree.ts # coordinates traversal using a root parameter
+```
+
+### B. Perception Engine Architecture & Modularization
+To ensure scalability and keep Flowly's parser codebase clean as we integrate complex single page applications (SPAs) like Gmail, X/Twitter, and Reddit, the parsing logic was partitioned into modular sub-modules:
+
+1. **Stateful ID Generation (`idGenerator.ts`)**: Produces stable, namespaced IDs with the prefix `flowly-node-X` (e.g. `flowly-node-0`, `flowly-node-1`), avoiding collisions with target-site identifiers.
+2. **Visibility Verification (`visibility.ts`)**: Validates computed layout properties (`display: none`, `visibility: hidden`, `opacity: 0`) and requires bounding boxes to exceed 0 width/height to avoid indexing hidden elements.
+3. **Role Determination (`roles.ts`)**: Maps raw tags (like `a`, `button`, `input`), attributes (like `role`, `type`), and styles (like `cursor: pointer`) to unified roles (`button`, `link`, `textbox`, `checkbox`, `dropdown`). Filters structure to keep **Meaningful Containers** (e.g. elements with landmark roles, explicit `aria-label`, forms, articles) while skipping generic layout wrappers.
+4. **Text Extraction (`extractText.ts`)**: Separates direct text nodes of an element from text contained in nested child sub-trees. Limits interactive text fields to a maximum of 150 characters.
+5. **Node Factory (`nodeFactory.ts`)**: Builds standard, type-safe `SemanticNode` instances from DOM structures. Extracts crucial accessibility parameters: `ariaLabel` (aria-label/title), `placeholder`, `disabled`, `checked`, `expanded`, and `selected`. Refrains from generating brittle, volatile CSS selectors; the perception layer relies entirely on `data-flowly-id` attributes for DOM references.
+6. **Subtree Coordinator (`accessibilityTree.ts`)**: Traverses the DOM recursively starting from a customizable `root` node (defaulting to `document.body`), dynamically assigning parents and tracking parent-child hierarchies.
+
+### C. Extension Verification & Automated Playwright Tests
+To verify the extension perception pipeline automatically, we added a Playwright test script inside the `backend` package:
+- **Test Command**: `pnpm --filter @flowly/backend test:extension`
+- **Mechanism**: Preloads the compiled `extension/dist` unpacked folder into a headful Chromium persistent context, navigates to a live Wikipedia page, waits for the content script to execute at `document_idle`, and inspects page elements.
+- **Console Log Output Layout**:
+  ```text
+  FLOWLY PARSER
+
+  [0] link       "Jump to content"
+  [1] link       "Main page"
+  [2] link       "Contents"
+  [3] link       "Current events"
+  ...
+  [238] link     "Help desk"
+  [239] text     "– Ask research questions about encyclopedic topics."
+  [240] link     "Reference desk"
+  ...
+  [431] link     "<flowly-node-431>"
+  [432] button   "<flowly-node-432>"
+  ```
+- **Results**: Verified that element state mutations (`data-flowly-id="flowly-node-*"`) and accessibility state parsers operate with 100% accuracy and zero compilation errors.
+
