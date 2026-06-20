@@ -126,8 +126,7 @@ export async function generateActionPlan(
 ): Promise<ActionPlan> {
   const isMockKey = !config.geminiApiKey ||
                     config.geminiApiKey.trim() === '' ||
-                    config.geminiApiKey.trim().startsWith('mock') ||
-                    config.geminiApiKey.trim().startsWith('AAQ.');
+                    config.geminiApiKey.trim().startsWith('mock');
 
   if (isMockKey) {
     console.log('🤖 [Planner] Mock/Placeholder Key detected. Running in Mock Planning Mode.');

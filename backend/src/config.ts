@@ -20,3 +20,6 @@ export const config = {
 if (!config.geminiApiKey) {
   console.warn('WARNING: GEMINI_API_KEY is not defined in the environment. LLM planning features will fail.');
 }
+
+// Trigger dev hot reload
+
