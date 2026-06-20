@@ -30,6 +30,7 @@ export function buildReplayTimeline(
       afterUrl: result?.afterUrl,
       beforeTitle: result?.beforeTitle,
       afterTitle: result?.afterTitle,
+      isRecovery: step.isRecovery
     };
   });
 }

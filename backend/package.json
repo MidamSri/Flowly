@@ -10,7 +10,7 @@
     "start": "node dist/server.js",
     "test:headless": "tsx src/run_headless.ts",
     "test:extension": "tsx src/test_extension.ts",
-    "test": "tsx src/test_parser.ts && tsx src/test_memory.ts"
+    "test": "tsx src/test_parser.ts && tsx src/test_memory.ts && tsx src/test_recovery.ts"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.1",

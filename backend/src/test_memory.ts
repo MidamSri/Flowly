@@ -1,6 +1,6 @@
 import { Action, SuccessfulPattern, FailurePattern, DomainMemory } from '@flowly/shared';
-import { computeSuccessfulPatternHash, computeFailurePatternHash, deduplicateAndAddSuccess, deduplicateAndAddFailure } from '../../extension/src/background/memory/deduplicator';
-import { serializeDomainMemory, deserializeDomainMemory, serializeMemories, deserializeMemories } from '../../extension/src/background/memory/serializers/domainMemory';
+import { computeSuccessfulPatternHash, computeFailurePatternHash, deduplicateAndAddSuccess, deduplicateAndAddFailure } from '../../extension/src/background/memory/deduplicator.js';
+import { serializeDomainMemory, deserializeDomainMemory, serializeMemories, deserializeMemories } from '../../extension/src/background/memory/serializers/domainMemory.js';
 
 console.log('🧪 Running Memory Subsystem Unit Tests...');
 

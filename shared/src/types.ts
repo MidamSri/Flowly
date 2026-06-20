@@ -18,7 +18,14 @@ export interface SemanticNode {
     width: number;
     height: number;
   };
+  boundingBox?: {         // Viewport-relative coordinates (Phase 7 Visual Grounding)
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
 }
+
 
 export interface PageState {
   url: string;
@@ -39,6 +46,7 @@ export interface Action {
   value?: string;         // Input text, URL, scroll direction (up/down)
   waitMs?: number;        // Wait duration (for type='wait')
   reasoning: string;      // LLM's reason for this step
+  isRecovery?: boolean;   // Flagged if this step is part of a recovery correction
 }
 
 export interface ActionPlan {
@@ -71,6 +79,41 @@ export interface ReplayTimelineItem {
   afterUrl?: string;
   beforeTitle?: string;
   afterTitle?: string;
+  isRecovery?: boolean;
+}
+
+export interface RecoveryAttempt {
+  attemptNumber: number;
+  failedAction: Action;
+  reason: string;
+  recoverySteps: Action[];
+  success: boolean;
+  timestamp: string;
+}
+
+export interface FailureContext {
+  failedStepIndex: number;
+  failedAction: Action;
+  error: string;
+  currentUrl: string;
+  currentTitle: string;
+  viewport: ViewportData;
+  screenshotId?: string;
+  recentActions: Action[];
+  nodes: SemanticNode[];
+}
+
+export interface RecoveryPlan {
+  id: string;
+  steps: Action[];
+}
+
+export interface RecoverRequest {
+  goal: string;
+  originalPlan: ActionPlan;
+  failureContext: FailureContext;
+  pageState: PageState;
+  relevantMemories?: DomainMemory | null;
 }
 
 export interface HistoryItem {
@@ -82,10 +125,38 @@ export interface HistoryItem {
   status: 'success' | 'failed' | 'aborted';
   pageTitle?: string;
   pageUrl?: string;
-  plan: ActionPlan;
+  originalPlan: ActionPlan;
+  currentPlan: ActionPlan;
   stepResults: ActionResult[];
   timeline: ReplayTimelineItem[];
+  screenshotIds?: string[];
+  recoveryHistory?: RecoveryAttempt[];
+  executionMode?: ExecutionMode;
+  iterationHistory?: IterationSummary[];
 }
+
+export interface ScreenshotMetadata {
+  id: string;
+  version: 1;
+  timestamp: string;
+  type: 'run_start' | 'step' | 'run_end';
+  stepIndex?: number;
+  actionIndex?: number;
+  url: string;
+  pageTitle: string;
+  scrollX: number;
+  scrollY: number;
+  viewportWidth: number;
+  viewportHeight: number;
+  filepath: string;
+}
+
+export interface VisualContext {
+  screenshot: ScreenshotMetadata;
+  viewport: ViewportData;
+  nodes: SemanticNode[];
+}
+
 
 export interface ViewportData {
   scrollX: number;
@@ -168,7 +239,18 @@ export type ExecutionEventType =
   | 'RUN_FINISHED'
   | 'RUN_ABORTED'
   | 'RUN_RECORDED'
-  | 'MEMORY_CREATED';
+  | 'MEMORY_CREATED'
+  | 'SCREENSHOT_CAPTURED'
+  | 'RECOVERY_STARTED'
+  | 'RECOVERY_SUCCEEDED'
+  | 'RECOVERY_FAILED'
+  | 'GOAL_COMPLETED'
+  | 'GOAL_NOT_COMPLETED'
+  | 'SESSION_STARTED'
+  | 'SESSION_FINISHED'
+  | 'ITERATION_STARTED'
+  | 'ITERATION_FINISHED';
+
 
 export interface ExecutionEvent {
   type: ExecutionEventType;
@@ -180,12 +262,15 @@ export interface ExecutionEvent {
   afterUrl?: string;
   beforeTitle?: string;
   afterTitle?: string;
+  screenshot?: ScreenshotMetadata;
 }
+
 
 export interface RunnerState {
   goal: string;
   status: RunnerStatus;
-  plan: ActionPlan | null;
+  originalPlan: ActionPlan | null;
+  currentPlan: ActionPlan | null;
   currentStepIndex: number | null;
   stepStatuses: StepStatus[];
   stepResults?: ActionResult[];
@@ -196,6 +281,11 @@ export interface RunnerState {
   finishedAt?: string | null; // ISO timestamp
   history: HistoryItem[];
   memories: DomainMemory[];
+  recoveryHistory: RecoveryAttempt[];
+  recoveryStatus?: 'idle' | 'started' | 'succeeded' | 'failed';
+  recoveryReason?: string;
+  executionMode: ExecutionMode;
+  activeSession?: AgentSession | null;
 }
 
 // Sidebar <-> Background
@@ -204,7 +294,8 @@ export type SidebarRequest =
   | { type: 'GENERATE_PLAN'; goal: string }
   | { type: 'APPROVE_RUN' }
   | { type: 'CANCEL_RUN' }
-  | { type: 'CLEAR_HISTORY' };
+  | { type: 'CLEAR_HISTORY' }
+  | { type: 'SET_EXECUTION_MODE'; mode: ExecutionMode };
 
 export type SidebarResponse =
   | { type: 'STATE_SYNC'; state: RunnerState }
@@ -223,4 +314,42 @@ export type ContentResponse =
   | { type: 'EXECUTE_ACTION_RESPONSE'; success: boolean; error?: string }
   | { type: 'VALIDATE_ELEMENT_RESPONSE'; success: boolean; exists: boolean; visible: boolean; enabled: boolean; error?: string }
   | { type: 'GET_VIEWPORT_RESPONSE'; success: boolean; viewport?: ViewportData; error?: string };
+
+export type ExecutionMode = 'single_plan' | 'session';
+
+export interface IterationSummary {
+  iteration: number;
+  plan: ActionPlan;
+  stepResults: ActionResult[];
+  recoveryAttempts: RecoveryAttempt[];
+  screenshots: string[];
+  completed: boolean;
+}
+
+export interface AgentSession {
+  id: string;
+  goal: string;
+  status: 'running' | 'completed' | 'failed' | 'aborted';
+  startedAt: string;
+  completedAt?: string;
+  currentIteration: number;
+  totalStepsExecuted: number;
+  totalRecoveries: number;
+  iterationHistory: IterationSummary[];
+}
+
+export interface CheckGoalRequest {
+  goal: string;
+  url: string;
+  title: string;
+  elements: SemanticNode[];
+  relevantMemories?: DomainMemory | null;
+  history?: StepHistoryItem[];
+}
+
+export interface GoalCompletionResult {
+  completed: boolean;
+  confidence: number;
+  reason: string;
+}
 

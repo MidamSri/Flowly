@@ -5,7 +5,8 @@ function App() {
   const [runnerState, setRunnerState] = useState<RunnerState>({
     goal: '',
     status: 'idle',
-    plan: null,
+    originalPlan: null,
+    currentPlan: null,
     currentStepIndex: null,
     stepStatuses: [],
     logs: [],
@@ -14,7 +15,10 @@ function App() {
     startedAt: null,
     finishedAt: null,
     history: [],
-    memories: []
+    memories: [],
+    recoveryHistory: [],
+    recoveryStatus: 'idle',
+    executionMode: 'single_plan'
   });
 
   const [inputGoal, setInputGoal] = useState('');
@@ -22,6 +26,34 @@ function App() {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selectedMemoryDomain, setSelectedMemoryDomain] = useState<string | null>(null);
   const [inspectorStepIndex, setInspectorStepIndex] = useState<number>(0);
+  const [loadedScreenshots, setLoadedScreenshots] = useState<any[]>([]);
+  const [selectedIterationIndex, setSelectedIterationIndex] = useState<number>(0);
+
+  // Load screenshot metadata when selectedRunId changes
+  useEffect(() => {
+    if (!selectedRunId) {
+      setLoadedScreenshots([]);
+      return;
+    }
+    const run = (runnerState.history || []).find(h => h.id === selectedRunId);
+    const screenshotIds = run?.screenshotIds;
+    if (!run || !screenshotIds || screenshotIds.length === 0) {
+      setLoadedScreenshots([]);
+      return;
+    }
+
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      const keys = screenshotIds.map(id => `flowly_screenshot_${id}`);
+      chrome.storage.local.get(keys, (result) => {
+        if (result) {
+          const metadatas = screenshotIds
+            .map(id => result[`flowly_screenshot_${id}`])
+            .filter(Boolean);
+          setLoadedScreenshots(metadatas);
+        }
+      });
+    }
+  }, [selectedRunId, runnerState.history]);
 
   const portRef = useRef<chrome.runtime.Port | null>(null);
   const logsEndRef = useRef<HTMLDivElement | null>(null);
@@ -77,14 +109,14 @@ function App() {
     }
   };
 
-  const { status, plan, stepStatuses, stepResults, currentStepIndex, logs, pageTitle, pageUrl, startedAt, finishedAt, memories = [] } = runnerState;
+  const { status, originalPlan, currentPlan, stepStatuses, stepResults, currentStepIndex, logs, pageTitle, pageUrl, startedAt, finishedAt, memories = [], recoveryHistory = [], recoveryStatus, recoveryReason, executionMode = 'single_plan', activeSession } = runnerState;
 
   const isPlanning = status === 'parsing' || status === 'planning';
   const isExecuting = status === 'executing';
-  const hasPlan = plan && plan.steps.length > 0;
+  const hasPlan = currentPlan && currentPlan.steps.length > 0;
 
   // Determine confidence color details
-  const confidence = plan?.confidence ?? 0;
+  const confidence = currentPlan?.confidence ?? 0;
   const confidenceColor = 
     confidence >= 0.8 ? 'var(--success)' : 
     confidence >= 0.5 ? 'var(--warning)' : 
@@ -143,6 +175,7 @@ function App() {
                   onClick={() => {
                     setSelectedRunId(item.id);
                     setInspectorStepIndex(0);
+                    setSelectedIterationIndex(0);
                   }}
                   className="glass-panel interactive-btn"
                   style={{
@@ -200,7 +233,41 @@ function App() {
     const statusColor = isSuccess ? 'var(--success)' : isAborted ? 'var(--warning)' : 'var(--error)';
     const statusText = run.status.toUpperCase();
 
-    const activeStep = run.timeline[inspectorStepIndex];
+    const isSession = run.executionMode === 'session' && run.iterationHistory && run.iterationHistory.length > 0;
+    const currentIterationData = isSession ? run.iterationHistory![selectedIterationIndex] : null;
+
+    const iterationSteps = currentIterationData ? currentIterationData.plan.steps : [];
+    const iterationResults = currentIterationData ? currentIterationData.stepResults : [];
+    const iterationTimeline = currentIterationData 
+      ? iterationSteps.map((step, idx) => {
+          const result = iterationResults[idx];
+          return {
+            stepIndex: idx,
+            type: step.type,
+            elementId: step.elementId,
+            value: step.value,
+            reasoning: step.reasoning,
+            executed: !!result,
+            success: result?.success,
+            durationMs: result?.durationMs,
+            error: result?.error,
+            nodeRole: result?.nodeRole,
+            nodeText: result?.nodeText,
+            beforeUrl: result?.beforeUrl,
+            afterUrl: result?.afterUrl,
+            beforeTitle: result?.beforeTitle,
+            afterTitle: result?.afterTitle,
+            isRecovery: step.isRecovery
+          };
+        })
+      : run.timeline;
+
+    const activeStep = iterationTimeline[inspectorStepIndex];
+    const stepScreenshot = currentIterationData
+      ? loadedScreenshots.find(s => currentIterationData.screenshots.includes(s.id) && s.type === 'step' && s.stepIndex === inspectorStepIndex)
+      : loadedScreenshots.find(s => s.type === 'step' && s.stepIndex === inspectorStepIndex);
+
+    const activeRecoveryHistory = currentIterationData ? currentIterationData.recoveryAttempts : run.recoveryHistory;
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', animation: 'fadeIn 0.2s' }}>
@@ -240,7 +307,9 @@ function App() {
                 durationMs: run.durationMs,
                 pageUrl: run.pageUrl,
                 pageTitle: run.pageTitle,
-                plan: run.plan,
+                originalPlan: run.originalPlan,
+                currentPlan: run.currentPlan,
+                recoveryHistory: run.recoveryHistory,
                 stepResults: run.stepResults,
                 timeline: run.timeline
               };
@@ -296,7 +365,11 @@ function App() {
             </div>
             <div>
               <span style={{ fontSize: '9px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Actions</span>
-              <div style={{ fontSize: '11px', fontWeight: 600 }}>{run.timeline.length} steps</div>
+              <div style={{ fontSize: '11px', fontWeight: 600 }}>
+                {isSession 
+                  ? `${run.iterationHistory!.reduce((acc, iter) => acc + iter.plan.steps.length, 0)} steps (${run.iterationHistory!.length} iterations)` 
+                  : `${run.timeline.length} steps`}
+              </div>
             </div>
             <div>
               <span style={{ fontSize: '9px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Page</span>
@@ -310,17 +383,100 @@ function App() {
           </div>
         </div>
 
+        {/* Iteration Selector for Session Runs */}
+        {isSession && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <span style={{ fontSize: '10px', textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '0.5px' }}>Inspect Iteration</span>
+            <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '4px' }}>
+              {run.iterationHistory!.map((iter, idx) => {
+                const isCurrent = idx === selectedIterationIndex;
+                return (
+                  <button
+                    key={idx}
+                    onClick={() => {
+                      setSelectedIterationIndex(idx);
+                      setInspectorStepIndex(0);
+                    }}
+                    className="interactive-btn"
+                    style={{
+                      background: isCurrent ? 'var(--primary)' : 'rgba(255, 255, 255, 0.03)',
+                      border: `1px solid ${isCurrent ? 'var(--primary)' : 'var(--border)'}`,
+                      color: '#fff',
+                      borderRadius: '6px',
+                      padding: '6px 12px',
+                      fontSize: '11px',
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    Iteration {iter.iteration} {iter.completed ? '✓' : ''}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Run Recovery History if any */}
+        {activeRecoveryHistory && activeRecoveryHistory.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <span style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-muted)' }}>
+              Recovery History ({activeRecoveryHistory.length})
+            </span>
+            {activeRecoveryHistory.map((attempt, index) => (
+              <div key={index} className="glass-panel" style={{
+                padding: '10px',
+                background: attempt.success ? 'rgba(16, 185, 129, 0.04)' : 'rgba(244, 63, 94, 0.04)',
+                borderColor: attempt.success ? 'rgba(16, 185, 129, 0.15)' : 'rgba(244, 63, 94, 0.15)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '4px',
+                border: '1px solid var(--border)',
+                borderRadius: '8px'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', fontWeight: 600 }}>
+                  <span style={{ color: attempt.success ? 'var(--success)' : 'var(--warning)' }}>
+                    Attempt #{attempt.attemptNumber}
+                  </span>
+                  <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                    {attempt.success ? 'Success' : 'Failed'}
+                  </span>
+                </div>
+                <div style={{ fontSize: '10.5px', color: 'var(--text-muted)' }}>
+                  <strong>Failed Action:</strong> {attempt.failedAction.type} {attempt.failedAction.elementId ? `[${attempt.failedAction.elementId}]` : ''}
+                </div>
+                <div style={{ fontSize: '10.5px', color: 'var(--error)' }}>
+                  <strong>Reason:</strong> {attempt.reason}
+                </div>
+                {attempt.recoverySteps && attempt.recoverySteps.length > 0 && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', marginTop: '2px' }}>
+                    <div style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-main)' }}>Recovery Plan:</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', paddingLeft: '6px', borderLeft: '2px solid var(--border)' }}>
+                      {attempt.recoverySteps.map((step, idx) => (
+                        <div key={idx} style={{ color: 'var(--text-muted)', fontFamily: "'JetBrains Mono', monospace", fontSize: '9.5px' }}>
+                          {idx + 1}. {step.type}{step.elementId ? ` [${step.elementId}]` : ''}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Timeline Inspector Step Viewer */}
         <div className="glass-panel" style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
             <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Timeline Inspector</span>
             <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
-              Step {inspectorStepIndex + 1} of {run.timeline.length}
+              Step {inspectorStepIndex + 1} of {iterationTimeline.length}
             </span>
           </div>
 
           {/* Navigation Controls */}
-          {run.timeline.length > 0 ? (
+          {iterationTimeline.length > 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
               {/* Step Details Box */}
               {activeStep ? (
@@ -348,6 +504,20 @@ function App() {
                           <code style={{ fontSize: '10px', color: 'var(--accent-blue)', background: 'rgba(14, 165, 233, 0.1)', padding: '1px 4px', borderRadius: '3px' }}>
                             {activeStep.elementId}
                           </code>
+                        )}
+                        {activeStep.isRecovery && (
+                          <span style={{
+                            fontSize: '9px',
+                            background: 'rgba(245, 158, 11, 0.15)',
+                            color: 'var(--warning)',
+                            border: '1px solid rgba(245, 158, 11, 0.3)',
+                            padding: '1px 4px',
+                            borderRadius: '3px',
+                            fontWeight: 600,
+                            textTransform: 'uppercase'
+                          }}>
+                            Recovery Action
+                          </span>
                         )}
                       </div>
                       
@@ -423,6 +593,13 @@ function App() {
                       <strong>Error:</strong> {activeStep.error}
                     </div>
                   )}
+
+                  {/* Step screenshot viewer */}
+                  {stepScreenshot && (
+                    <div style={{ borderTop: '1px solid var(--border)', paddingTop: '8px', marginTop: '8px' }}>
+                      <ScreenshotViewer id={stepScreenshot.id} metadata={stepScreenshot} />
+                    </div>
+                  )}
                 </div>
               ) : null}
 
@@ -448,8 +625,8 @@ function App() {
                   Previous Step
                 </button>
                 <button
-                  disabled={inspectorStepIndex === run.timeline.length - 1}
-                  onClick={() => setInspectorStepIndex(prev => Math.min(run.timeline.length - 1, prev + 1))}
+                  disabled={inspectorStepIndex === iterationTimeline.length - 1}
+                  onClick={() => setInspectorStepIndex(prev => Math.min(iterationTimeline.length - 1, prev + 1))}
                   className="interactive-btn"
                   style={{
                     flex: 1,
@@ -460,8 +637,8 @@ function App() {
                     color: 'var(--text-main)',
                     fontSize: '12px',
                     fontWeight: 600,
-                    cursor: inspectorStepIndex === run.timeline.length - 1 ? 'not-allowed' : 'pointer',
-                    opacity: inspectorStepIndex === run.timeline.length - 1 ? 0.4 : 1
+                    cursor: inspectorStepIndex === iterationTimeline.length - 1 ? 'not-allowed' : 'pointer',
+                    opacity: inspectorStepIndex === iterationTimeline.length - 1 ? 0.4 : 1
                   }}
                 >
                   Next Step
@@ -477,7 +654,7 @@ function App() {
                 overflowX: 'auto',
                 padding: '4px 0'
               }}>
-                {run.timeline.map((step, idx) => {
+                {iterationTimeline.map((step, idx) => {
                   const isCurrent = idx === inspectorStepIndex;
                   const stepSuccess = step.executed ? step.success : undefined;
                   
@@ -519,6 +696,31 @@ function App() {
             </div>
           )}
         </div>
+
+        {/* Screenshot Gallery */}
+        {loadedScreenshots.length > 0 && (
+          <div className="glass-panel" style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Screenshot Gallery</span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
+              {loadedScreenshots.map((s, idx) => {
+                let label = 'Screenshot';
+                if (s.type === 'run_start') {
+                  label = 'Initial State';
+                } else if (s.type === 'run_end') {
+                  label = 'Final State';
+                } else {
+                  label = `Step ${s.stepIndex !== undefined ? s.stepIndex + 1 : idx + 1}`;
+                }
+
+                return (
+                  <GalleryItem key={s.id} screenshot={s} label={label} />
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -871,6 +1073,52 @@ function App() {
               onBlur={(e) => e.target.style.borderColor = 'var(--border)'}
             />
             
+            {/* Execution Mode Selection */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '8px 0',
+              borderTop: '1px solid var(--border)',
+              marginTop: '4px'
+            }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-main)' }}>Autonomous Mode</span>
+                <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Multi-step planning & auto-healing</span>
+              </div>
+              <button
+                type="button"
+                disabled={isPlanning || isExecuting || status === 'waiting_approval'}
+                onClick={() => {
+                  const newMode = executionMode === 'session' ? 'single_plan' : 'session';
+                  portRef.current?.postMessage({ type: 'SET_EXECUTION_MODE', mode: newMode } as SidebarRequest);
+                }}
+                style={{
+                  background: executionMode === 'session' ? 'var(--primary)' : 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid var(--border)',
+                  borderRadius: '16px',
+                  width: '42px',
+                  height: '24px',
+                  position: 'relative',
+                  cursor: (isPlanning || isExecuting || status === 'waiting_approval') ? 'not-allowed' : 'pointer',
+                  transition: 'all 0.2s ease-in-out',
+                  padding: 0
+                }}
+              >
+                <div style={{
+                  width: '18px',
+                  height: '18px',
+                  borderRadius: '50%',
+                  background: '#fff',
+                  position: 'absolute',
+                  top: '2px',
+                  left: executionMode === 'session' ? '22px' : '2px',
+                  transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.3)'
+                }} />
+              </button>
+            </div>
+            
             {status === 'idle' || status === 'success' || status === 'failed' ? (
               <button
                 type="submit"
@@ -924,6 +1172,86 @@ function App() {
               )
             )}
           </form>
+
+          {/* Session Panel */}
+          {activeSession && (
+            <div className="glass-panel fade-in" style={{
+              padding: '14px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+              border: `1px solid ${
+                activeSession.status === 'completed' ? 'rgba(16, 185, 129, 0.3)' :
+                activeSession.status === 'failed' ? 'rgba(244, 63, 94, 0.3)' :
+                'var(--primary-glow)'
+              }`,
+              boxShadow: activeSession.status === 'completed' ? '0 4px 20px rgba(16, 185, 129, 0.1)' :
+                         activeSession.status === 'failed' ? '0 4px 20px rgba(244, 63, 94, 0.1)' :
+                         '0 4px 20px var(--primary-glow)'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '6px' }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-muted)' }}>
+                  Autonomous Agent Session
+                </span>
+                <span style={{ fontSize: '10px', fontFamily: 'monospace', color: 'var(--text-muted)' }}>
+                  ID: {activeSession.id.substring(0, 8)}
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '2px 0' }}>
+                {activeSession.status === 'running' && (
+                  <>
+                    <div style={{
+                      width: '8px',
+                      height: '8px',
+                      borderRadius: '50%',
+                      background: 'var(--primary)',
+                      animation: 'pulse 1.5s infinite ease-in-out'
+                    }} />
+                    <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--primary)' }}>Running Bounded Loop</span>
+                  </>
+                )}
+                {activeSession.status === 'completed' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--success)', fontSize: '13px', fontWeight: 700 }}>
+                    <span>✓ Goal Completed</span>
+                  </div>
+                )}
+                {activeSession.status === 'failed' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--error)', fontSize: '13px', fontWeight: 700 }}>
+                    <span>✗ Session Failed</span>
+                  </div>
+                )}
+                {activeSession.status === 'aborted' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--warning)', fontSize: '13px', fontWeight: 700 }}>
+                    <span>⊘ Session Aborted</span>
+                  </div>
+                )}
+              </div>
+
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: '8px',
+                background: 'rgba(0, 0, 0, 0.15)',
+                padding: '8px',
+                borderRadius: '6px',
+                border: '1px solid var(--border)'
+              }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', textAlign: 'center' }}>
+                  <span style={{ fontSize: '9px', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Iteration</span>
+                  <span style={{ fontSize: '12px', fontWeight: 600 }}>{activeSession.currentIteration} / 5</span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', textAlign: 'center', borderLeft: '1px solid var(--border)', borderRight: '1px solid var(--border)' }}>
+                  <span style={{ fontSize: '9px', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Recoveries</span>
+                  <span style={{ fontSize: '12px', fontWeight: 600 }}>{activeSession.totalRecoveries} / 2</span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', textAlign: 'center' }}>
+                  <span style={{ fontSize: '9px', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Steps</span>
+                  <span style={{ fontSize: '12px', fontWeight: 600 }}>{activeSession.totalStepsExecuted} / 50</span>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Planning Spinner Indicator */}
           {isPlanning && (
@@ -984,12 +1312,79 @@ function App() {
 
               {/* Reasoning */}
               <div style={{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: '1.4', background: 'rgba(255, 255, 255, 0.02)', padding: '8px', borderRadius: '6px', border: '1px solid var(--border)' }}>
-                <strong>Reasoning:</strong> {plan.reasoning}
+                <strong>Reasoning:</strong> {currentPlan.reasoning}
               </div>
+
+              {/* Recovery Status Panel */}
+              {recoveryStatus && recoveryStatus !== 'idle' && (
+                <div className="glass-panel" style={{
+                  padding: '12px',
+                  background: recoveryStatus === 'started' ? 'rgba(245, 158, 11, 0.06)' :
+                             recoveryStatus === 'succeeded' ? 'rgba(16, 185, 129, 0.06)' :
+                             'rgba(244, 63, 94, 0.06)',
+                  border: `1px solid ${
+                    recoveryStatus === 'started' ? 'var(--warning)' :
+                    recoveryStatus === 'succeeded' ? 'var(--success)' :
+                    'var(--error)'
+                  }`,
+                  borderRadius: '8px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px'
+                }}>
+                  <div style={{
+                    fontWeight: 600,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    color: recoveryStatus === 'started' ? 'var(--warning)' :
+                           recoveryStatus === 'succeeded' ? 'var(--success)' :
+                           'var(--error)',
+                    fontSize: '12.5px'
+                  }}>
+                    {recoveryStatus === 'started' && (
+                      <>
+                        <span>⚠ Recovery Active</span>
+                        <span style={{
+                          fontSize: '10px',
+                          background: 'rgba(245, 158, 11, 0.15)',
+                          padding: '2px 6px',
+                          borderRadius: '10px',
+                          marginLeft: 'auto',
+                          fontWeight: 500
+                        }}>
+                          Attempt {recoveryHistory.length}/2
+                        </span>
+                      </>
+                    )}
+                    {recoveryStatus === 'succeeded' && <span>✓ Recovery Successful</span>}
+                    {recoveryStatus === 'failed' && <span>✗ Recovery Failed</span>}
+                  </div>
+
+                  {recoveryReason && (
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                      <strong>Reason:</strong> {recoveryReason}
+                    </div>
+                  )}
+
+                  {recoveryHistory.length > 0 && recoveryHistory[recoveryHistory.length - 1].recoverySteps.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', marginTop: '2px' }}>
+                      <div style={{ fontSize: '10.5px', fontWeight: 600, color: 'var(--text-main)' }}>Recovery Plan:</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', paddingLeft: '6px', borderLeft: '2px solid var(--border)' }}>
+                        {recoveryHistory[recoveryHistory.length - 1].recoverySteps.map((step, idx) => (
+                          <div key={idx} style={{ color: 'var(--text-muted)', fontFamily: "'JetBrains Mono', monospace", fontSize: '9.5px' }}>
+                            {idx + 1}. {step.type}{step.elementId ? ` [${step.elementId}]` : ''}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Sequential Steps List */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {plan.steps.map((step, idx) => {
+                {currentPlan.steps.map((step, idx) => {
                   const stepStatus = stepStatuses[idx] || 'pending';
                   const isCurrent = idx === currentStepIndex;
 
@@ -1294,3 +1689,305 @@ function App() {
 }
 
 export default App;
+
+function ScreenshotViewer({ id, metadata }: { id: string; metadata: any }) {
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    if (typeof chrome !== 'undefined' && chrome.runtime) {
+      chrome.runtime.sendMessage({ type: 'GET_SCREENSHOT', id }, (response) => {
+        if (!active) return;
+        if (response && response.dataUrl) {
+          setImageUrl(response.dataUrl);
+        } else {
+          setError('Image not found in cache (transient cache cleared)');
+        }
+      });
+    }
+    return () => {
+      active = false;
+    };
+  }, [id]);
+
+  if (error) {
+    return <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic', marginTop: '6px' }}>{error}</div>;
+  }
+
+  if (!imageUrl) {
+    return <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '6px' }}>Loading screenshot...</div>;
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--success)', fontSize: '11px', fontWeight: 600 }}>
+        <span>📷 Screenshot Available</span>
+      </div>
+      <img
+        src={imageUrl}
+        alt="Step Screenshot"
+        style={{
+          width: '100%',
+          maxHeight: '130px',
+          objectFit: 'cover',
+          borderRadius: '4px',
+          border: '1px solid var(--border)',
+          cursor: 'pointer'
+        }}
+        onClick={() => setExpanded(true)}
+      />
+      <button
+        onClick={() => setExpanded(true)}
+        className="interactive-btn"
+        style={{
+          alignSelf: 'flex-start',
+          background: 'rgba(255, 255, 255, 0.05)',
+          border: '1px solid var(--border)',
+          borderRadius: '4px',
+          padding: '4px 8px',
+          fontSize: '11px',
+          cursor: 'pointer',
+          color: 'var(--text-main)'
+        }}
+      >
+        Expand Screenshot
+      </button>
+
+      {expanded && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          backgroundColor: 'rgba(0, 0, 0, 0.85)',
+          zIndex: 9999,
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          padding: '20px',
+          boxSizing: 'border-box'
+        }} onClick={() => setExpanded(false)}>
+          <div style={{
+            background: '#121214',
+            border: '1px solid var(--border)',
+            borderRadius: '12px',
+            padding: '16px',
+            maxWidth: '90%',
+            maxHeight: '90%',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px',
+            position: 'relative',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)'
+          }} onClick={e => e.stopPropagation()}>
+            <button
+              onClick={() => setExpanded(false)}
+              style={{
+                position: 'absolute',
+                top: '12px',
+                right: '12px',
+                background: 'rgba(255, 255, 255, 0.1)',
+                border: 'none',
+                color: '#fff',
+                borderRadius: '50%',
+                width: '24px',
+                height: '24px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: 'bold',
+                zIndex: 10
+              }}
+            >
+              ✕
+            </button>
+
+            <img
+              src={imageUrl}
+              alt="Screenshot Expanded"
+              style={{
+                maxWidth: '100%',
+                maxHeight: '60vh',
+                objectFit: 'contain',
+                borderRadius: '6px',
+                border: '1px solid var(--border)'
+              }}
+            />
+
+            <div style={{ fontSize: '11px', display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-main)', textAlign: 'left' }}>
+              <div><strong>URL:</strong> <span style={{ color: 'var(--text-muted)', fontFamily: 'monospace', wordBreak: 'break-all' }}>{metadata.url}</span></div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                <div><strong>Timestamp:</strong> <span style={{ color: 'var(--text-muted)' }}>{new Date(metadata.timestamp).toLocaleTimeString()}</span></div>
+                <div><strong>Viewport:</strong> <span style={{ color: 'var(--text-muted)' }}>{metadata.viewportWidth} x {metadata.viewportHeight}</span></div>
+                <div><strong>Scroll Position:</strong> <span style={{ color: 'var(--text-muted)' }}>({metadata.scrollX}, {metadata.scrollY})</span></div>
+                {metadata.stepIndex !== undefined && (
+                  <div><strong>Associated Step:</strong> <span style={{ color: 'var(--text-muted)' }}>Step {metadata.stepIndex + 1}</span></div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GalleryItem({ screenshot, label }: { screenshot: any; label: string }) {
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [error, setError] = useState<boolean>(false);
+
+  useEffect(() => {
+    let active = true;
+    if (typeof chrome !== 'undefined' && chrome.runtime) {
+      chrome.runtime.sendMessage({ type: 'GET_SCREENSHOT', id: screenshot.id }, (response) => {
+        if (!active) return;
+        if (response && response.dataUrl) {
+          setImageUrl(response.dataUrl);
+        } else {
+          setError(true);
+        }
+      });
+    }
+    return () => {
+      active = false;
+    };
+  }, [screenshot.id]);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'center' }}>
+      {error ? (
+        <div style={{
+          width: '100%',
+          height: '60px',
+          background: 'rgba(255, 255, 255, 0.02)',
+          borderRadius: '4px',
+          border: '1px solid var(--border)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '9px',
+          color: 'var(--text-muted)',
+          fontStyle: 'italic',
+          textAlign: 'center',
+          padding: '4px'
+        }}>
+          Pruned
+        </div>
+      ) : imageUrl ? (
+        <img
+          src={imageUrl}
+          alt={label}
+          style={{
+            width: '100%',
+            height: '60px',
+            objectFit: 'cover',
+            borderRadius: '4px',
+            border: '1px solid var(--border)',
+            cursor: 'pointer'
+          }}
+          onClick={() => setExpanded(true)}
+        />
+      ) : (
+        <div style={{
+          width: '100%',
+          height: '60px',
+          background: 'rgba(0,0,0,0.2)',
+          borderRadius: '4px',
+          border: '1px solid var(--border)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '9px',
+          color: 'var(--text-muted)'
+        }}>
+          Loading...
+        </div>
+      )}
+      <span style={{ fontSize: '9px', color: 'var(--text-muted)', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%' }}>
+        {label}
+      </span>
+
+      {expanded && imageUrl && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          backgroundColor: 'rgba(0, 0, 0, 0.85)',
+          zIndex: 9999,
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          padding: '20px',
+          boxSizing: 'border-box'
+        }} onClick={() => setExpanded(false)}>
+          <div style={{
+            background: '#121214',
+            border: '1px solid var(--border)',
+            borderRadius: '12px',
+            padding: '16px',
+            maxWidth: '90%',
+            maxHeight: '90%',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px',
+            position: 'relative',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)'
+          }} onClick={e => e.stopPropagation()}>
+            <button
+              onClick={() => setExpanded(false)}
+              style={{
+                position: 'absolute',
+                top: '12px',
+                right: '12px',
+                background: 'rgba(255, 255, 255, 0.1)',
+                border: 'none',
+                color: '#fff',
+                borderRadius: '50%',
+                width: '24px',
+                height: '24px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: 'bold',
+                zIndex: 10
+              }}
+            >
+              ✕
+            </button>
+
+            <img
+              src={imageUrl}
+              alt="Screenshot Expanded"
+              style={{
+                maxWidth: '100%',
+                maxHeight: '60vh',
+                objectFit: 'contain',
+                borderRadius: '6px',
+                border: '1px solid var(--border)'
+              }}
+            />
+
+            <div style={{ fontSize: '11px', display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-main)', textAlign: 'left' }}>
+              <div><strong>Label:</strong> <span style={{ color: 'var(--text-muted)' }}>{label}</span></div>
+              <div><strong>URL:</strong> <span style={{ color: 'var(--text-muted)', fontFamily: 'monospace', wordBreak: 'break-all' }}>{screenshot.url}</span></div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                <div><strong>Timestamp:</strong> <span style={{ color: 'var(--text-muted)' }}>{new Date(screenshot.timestamp).toLocaleString()}</span></div>
+                <div><strong>Viewport:</strong> <span style={{ color: 'var(--text-muted)' }}>{screenshot.viewportWidth} x {screenshot.viewportHeight}</span></div>
+                <div><strong>Scroll Position:</strong> <span style={{ color: 'var(--text-muted)' }}>({screenshot.scrollX}, {screenshot.scrollY})</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+

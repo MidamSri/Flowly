@@ -1,9 +1,11 @@
 import { RunnerState, LogMessage, ExecutionEvent, RunnerStatus, StepStatus, SemanticNode, ActionResult, HistoryItem, DomainMemory } from '@flowly/shared';
+import { pruneScreenshots } from '../screenshots/screenshotPruner';
 
 let state: RunnerState = {
   goal: '',
   status: 'idle',
-  plan: null,
+  originalPlan: null,
+  currentPlan: null,
   currentStepIndex: null,
   stepStatuses: [],
   stepResults: [],
@@ -13,7 +15,11 @@ let state: RunnerState = {
   startedAt: null,
   finishedAt: null,
   history: [],
-  memories: []
+  memories: [],
+  recoveryHistory: [],
+  recoveryStatus: 'idle',
+  executionMode: 'single_plan',
+  activeSession: null
 };
 
 type StateListener = (state: RunnerState) => void;
@@ -50,7 +56,8 @@ export function resetState(): void {
     ...state,
     goal: '',
     status: 'idle',
-    plan: null,
+    originalPlan: null,
+    currentPlan: null,
     currentStepIndex: null,
     stepStatuses: [],
     stepResults: [],
@@ -58,7 +65,11 @@ export function resetState(): void {
     pageTitle: '',
     pageUrl: '',
     startedAt: null,
-    finishedAt: null
+    finishedAt: null,
+    recoveryHistory: [],
+    recoveryStatus: 'idle',
+    recoveryReason: '',
+    activeSession: null
   };
   stateListeners.forEach(listener => listener(state));
 }
@@ -129,6 +140,7 @@ export function clearHistory(): void {
         console.error('Error clearing history in chrome.storage.local:', chrome.runtime.lastError);
       }
     });
+    pruneScreenshots([], 0);
   }
 
   stateListeners.forEach(listener => listener(state));

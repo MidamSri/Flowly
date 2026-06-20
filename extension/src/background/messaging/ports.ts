@@ -92,6 +92,9 @@ export function handleSidebarConnection(port: chrome.runtime.Port): void {
       case 'CLEAR_HISTORY':
         store.clearHistory();
         break;
+      case 'SET_EXECUTION_MODE':
+        store.updateState({ executionMode: message.mode });
+        break;
     }
   });
 }

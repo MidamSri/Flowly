@@ -5,6 +5,8 @@ import { executePlan } from './runner/runner';
 import { ContentRequest, ContentResponse } from '@flowly/shared';
 import { initMemoryStore } from './memory/memoryStore';
 import { getRelevantMemories } from './memory/memoryRetriever';
+import { getCachedScreenshot } from './screenshots/screenshotCache';
+import { runAutonomousLoop } from './agent/autonomousLoop';
 
 console.log('Flowly Background Service Worker Active.');
 
@@ -86,7 +88,8 @@ registerActionHandlers({
           
           store.updateState({
             status: 'waiting_approval',
-            plan,
+            originalPlan: plan,
+            currentPlan: plan,
             stepStatuses: plan.steps.map(() => 'pending'),
             currentStepIndex: null
           });
@@ -113,7 +116,7 @@ registerActionHandlers({
 
   onApproveRun: async () => {
     const state = store.getState();
-    if (state.status !== 'waiting_approval' || !state.plan) {
+    if (state.status !== 'waiting_approval' || !state.currentPlan) {
       store.addLog('warn', 'Execution approved, but runner state is not waiting_approval.');
       return;
     }
@@ -133,10 +136,16 @@ registerActionHandlers({
 
       activeAbortController = new AbortController();
       
-      // Execute the plan asynchronously
-      executePlan(tabId, activeAbortController.signal).finally(() => {
-        activeAbortController = null;
-      });
+      const mode = state.executionMode;
+      if (mode === 'session') {
+        runAutonomousLoop(tabId, state.goal, activeAbortController.signal).finally(() => {
+          activeAbortController = null;
+        });
+      } else {
+        executePlan(tabId, activeAbortController.signal).finally(() => {
+          activeAbortController = null;
+        });
+      }
 
     } catch (err: any) {
       store.updateState({ status: 'failed' });
@@ -158,3 +167,13 @@ registerActionHandlers({
     }
   }
 });
+
+// Handle screenshot requests from Sidebar UI
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message && message.type === 'GET_SCREENSHOT') {
+    const dataUrl = getCachedScreenshot(message.id);
+    sendResponse({ dataUrl });
+  }
+  return false;
+});
+

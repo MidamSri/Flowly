@@ -516,4 +516,178 @@ extension/src/background/memory/
    ✅ Failure pattern deduplication passed.
    ✅ Serialization & version schema migration passed.
    🎉 All Memory Subsystem Unit Tests Passed Successfully!
+
+---
+
+## 11. Phase 7 (Visual Grounding)
+
+The objective of Phase 7 was to introduce passive screenshot capturing, viewport tracking, element bounding boxes, and an upgraded Timeline Inspector to inspect visual states during run execution without introducing heavyweight data into history storage.
+
+### A. Repository & Directory Structure Additions
+We introduced the screenshots module and its sub-structure under the background folder:
+```text
+extension/src/background/screenshots/
+├── models/
+│   └── ScreenshotMetadata.ts # Re-exports and links ScreenshotMetadata structure
+├── screenshotCache.ts        # Runtime in-memory dataUrl asset storage
+├── screenshotManager.ts      # Captures active tab and gathers viewport data
+└── screenshotPruner.ts       # Removes metadata from storage and cleans image cache
+```
+
+### B. Component Details & Code Mechanics
+
+1. **Enriched Schema Types (`shared/src/types.ts`)**:
+   - Defined `ScreenshotMetadata`: stores `id`, version (`1`), `timestamp`, screenshot type (`'run_start'` | `'step'` | `'run_end'`), step indices, URL, page title, scroll offsets (`scrollX`, `scrollY`), viewport size, and storage key path (`filepath`).
+   - Defined `VisualContext`: groups screenshot metadata, viewport dimensions, and parsed semantic accessibility nodes for future multimodal stages.
+   - Expanded `HistoryItem` to hold lightweight `screenshotIds: string[]` instead of embedding large base64 image data strings.
+   - Added `'SCREENSHOT_CAPTURED'` to `ExecutionEventType` and `screenshot` details to `ExecutionEvent`.
+   - Appended `boundingBox` coordinates (viewport-relative) to `SemanticNode` properties.
+
+2. **Transient In-Memory Cache (`screenshotCache.ts`)**:
+   - Holds the heavy base64 screenshot data URLs in a transient service worker `Map` (mapping ID to data URL).
+   - Keeps local storage clean of bloated base64 strings and prevents storage quota errors.
+
+3. **Screenshot Manager (`screenshotManager.ts`)**:
+   - Captures active page screenshots on execution triggers using `chrome.tabs.captureVisibleTab`.
+   - Sends a `GET_VIEWPORT_REQUEST` query message to the content script to query live page scroll positions and layout width/height.
+   - Saves lightweight JSON metadata structures under key `flowly_screenshot_${id}` in `chrome.storage.local`.
+   - Places corresponding image data URLs in the transient cache.
+
+4. **Screenshot Pruner (`screenshotPruner.ts`)**:
+   - Retains screenshots only for the 3 most recent execution runs.
+   - Automatically deletes old screenshot metadata keys from `chrome.storage.local` and cleans their image associations from in-memory cache tables.
+
+5. **Coordinate Grounding (`nodeFactory.ts` & `run_headless.ts`)**:
+   - Configured accessibility tree parsers to include viewport-relative `boundingBox` parameters from `getBoundingClientRect()` without applying layout scroll offsets.
+
+6. **Sequential Capture Hooks (`executePlan.ts`)**:
+   - Triggers screenshot capture at three strategic runner execution points: before run start (`run_start`), after each successful execution step (`step`), and after run completion (`run_end`).
+   - Accumulates IDs during loops, attaches them to history items, and executes the pruner.
+
+7. **One-Off Query Messaging (`background.ts` & `App.tsx`)**:
+   - Configured an extension `chrome.runtime.onMessage` listener in the service worker to return transient data URLs to the Sidebar UI.
+   - Implemented a clean, async `GET_SCREENSHOT` request model in the sidebar.
+
+8. **Timeline Screenshot viewer & Gallery UI (`App.tsx`)**:
+   - **Timeline details**: Checks if a step has a screenshot metadata file available, rendering a `📷 Screenshot Available` tag and an expansion button.
+   - **Screenshot Gallery**: Renders a thumbnail grid at the bottom of the run trace detailing Initial, Intermediate, and Final states.
+   - **Rich Overlay Modal**: Clicking a screenshot thumbnail fetches the cached image data URL from the background service worker and renders a beautiful overlay showing URL, timestamp, and viewport information.
+
+### C. Verification Results
+
+1. **Compilation Build**:
+   ```bash
+   $ pnpm build
+   Scope: 3 of 4 workspace projects
+   backend build$ tsc
+   extension build$ tsc && vite build
+   backend build: Done
+   extension build: dist/background.js   21.46 kB
+   extension build: dist/popup.js       185.20 kB
+   extension build: Done
    ```
+
+2. **Parser and Memory Tests**:
+   Verified that perception parsing and memory subsystems pass without regression:
+   ```bash
+   $ pnpm --filter @flowly/backend test
+   🧪 Running Semantic Node Parser unit test...
+   ✅ Unit Test Passed: Semantic tree correctly pruned and structured!
+   🧪 Running Memory Subsystem Unit Tests...
+   ✅ Hashing normalization passed.
+   ✅ Successful pattern deduplication passed.
+   ✅ Failure pattern deduplication passed.
+   ✅ Serialization & version schema migration passed.
+   🎉 All Memory Subsystem Unit Tests Passed Successfully!
+   ```
+
+---
+
+## 12. Phase 8 (Recovery & Replanning)
+
+The objective of Phase 8 was to implement an execution recovery and plan repair loop, allowing the agent to dynamically recover from failed action steps by querying a dedicated recovery planner, merging correction plan fragments, and tracking attempts within a bounded retry policy.
+
+### A. Repository & Directory Structure Additions
+We introduced the recovery module inside the background service worker folder:
+```text
+extension/src/background/recovery/
+├── failureContextBuilder.ts  # [NEW] Builds failure context payload with DOM snapshots
+├── recoveryPlanner.ts        # [NEW] Requests recovery plan fragments from backend
+└── executionComposer.ts      # [NEW] Merges recovery plan steps into current plan
+```
+
+### B. Component Details & Code Mechanics
+
+1. **Shared Types Integration (`shared/src/types.ts`)**:
+   - Defined `FailureContext`: stores failed step index, failed action, error message, URL/title, viewport, screenshot ID, recent actions, and node snapshot.
+   - Defined `RecoveryAttempt`: stores attempt number, failed action, reason, recovery steps, success status, and timestamp.
+   - Defined `RecoveryPlan`: stores recovery ID and a sequence of corrective `Action`s.
+   - Defined `RecoverRequest` payload for sending failure context to `/api/recover`.
+   - Expanded `RunnerState` to hold `recoveryHistory: RecoveryAttempt[]` and `recoveryStatus: 'idle' | 'started' | 'succeeded' | 'failed'`.
+   - Added `'RECOVERY_STARTED'`, `'RECOVERY_SUCCEEDED'`, `'RECOVERY_FAILED'` events to `ExecutionEventType`.
+
+2. **Failure Context Builder (`failureContextBuilder.ts`)**:
+   - Gathers exact page variables (URL, title, elements, viewport) at the moment of failure.
+   - Extracts the last 5 executed actions as history context and captures a snapshot of DOM nodes.
+
+3. **Recovery Planner Client (`recoveryPlanner.ts`)**:
+   - Dispatches a request containing the failure state to the backend `/api/recover` endpoint.
+
+4. **Plan Execution Merger (`executionComposer.ts`)**:
+   - Injects recovery steps into the active plan execution queue directly after the failed step, modifying the active step pointer so that execution seamlessly proceeds through the recovery path.
+
+5. **LLM Recovery Planner (`backend/src/agent/planner.ts` & `backend/src/server.ts`)**:
+   - Added `POST /api/recover` endpoint.
+   - Prompts Gemini to generate minimal correction fragments (1-3 steps) rather than regenerating the entire action plan.
+   - Supports a mock recovery planner fallback returning a mock scroll and wait delay.
+
+6. **UI Observability (`App.tsx`)**:
+   - Renders a warning card in the sidebar showing `⚠ Recovery Active (Attempt X/2)` along with the error reason and the steps of the recovery plan fragment.
+   - Shows recovery success/failure inline on step results.
+
+---
+
+## 13. Phase 9 (Autonomous Agent Mode)
+
+The objective of Phase 9 was to introduce bounded autonomous multi-step execution. This allows the agent to run plan-execute-check cycles across multiple iterations without prompting the user for approval at every recovery or subplan step.
+
+### A. Repository & Directory Structure Additions
+We introduced the agent module and its sub-structure under the background folder:
+```text
+extension/src/background/agent/
+├── policies/
+│   ├── maxIterations.ts      # Enforces MAX_SESSION_ITERATIONS = 5 limit
+│   ├── maxRecoveries.ts      # Enforces MAX_RECOVERIES = 2 limit
+│   └── maxSteps.ts           # Enforces MAX_STEPS = 50 limit
+├── models/
+│   ├── AgentSession.ts       # Re-exports session structures
+│   └── IterationSummary.ts   # Re-exports iteration details
+├── sessionManager.ts         # Creates sessions, increments step/recovery stats
+├── completionDetector.ts     # Filters semantic nodes and posts satisfaction queries
+└── autonomousLoop.ts         # Iterative run-plan-execute-check loop orchestrator
+```
+
+### B. Component Details & Code Mechanics
+
+1. **Shared Types Integration (`shared/src/types.ts`)**:
+   - Defined `AgentSession` tracking ID, goal, status, start/end timestamps, stats, and a list of `IterationSummary` objects.
+   - Defined `IterationSummary` tracking iteration index, plan steps, results, recovery attempts, and screenshot IDs.
+   - Defined `GoalCompletionResult` capturing completion flag, confidence, and reasoning.
+   - Added `'SESSION_STARTED'`, `'SESSION_FINISHED'`, `'ITERATION_STARTED'`, `'ITERATION_FINISHED'`, `'GOAL_COMPLETED'`, `'GOAL_NOT_COMPLETED'` events.
+   - Exposed `executionMode` and `activeSession` in `RunnerState` and `HistoryItem`.
+
+2. **Goal Completion Checker (`completionDetector.ts` & `planner.ts`)**:
+   - Filters out layout containers and hidden nodes before sending DOM elements to keep the prompt context minimal and prevent token explosion.
+   - Implemented `POST /api/check-goal` Fastify endpoint and Gemini check, instructing the model to terminate if goal is achieved and avoid unnecessary actions.
+   - Mock completion check falls back to true if history has at least 2 steps, allowing replanning E2E testing.
+
+3. **Orchestrator Loop (`autonomousLoop.ts`)**:
+   - Covers both `'single_plan'` and `'session'` execution modes under reactive `AbortSignal` controls.
+   - Enforces bounds on every loop iteration, aborting or failing the session if limits are exceeded.
+   - Gathers iteration plan, step results, screenshots, and recoveries into `IterationSummary` and appends it to `iterationHistory`.
+   - On completion, writes a single integrated trace in history.
+
+4. **UI Toggle & Dashboard (`App.tsx` & `index.css`)**:
+   - Added a modern glass pill toggle switch to opt-in to **Autonomous Mode**.
+   - Displays a real-time **Session Panel** detailing current iteration progress, step counts, recoveries, and state badges with pulse animation.
+   - Upgraded the Past Runs inspector to allow browsing and exploring execution steps iteration-by-iteration.

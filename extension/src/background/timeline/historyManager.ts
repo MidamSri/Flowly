@@ -11,9 +11,11 @@ export interface ExportedTrace {
   durationMs: number;
   pageUrl?: string;
   pageTitle?: string;
-  plan: any;
+  originalPlan: any;
+  currentPlan: any;
   stepResults: any[];
   timeline: ReplayTimelineItem[];
+  recoveryHistory?: any[];
 }
 
 /**
@@ -21,16 +23,25 @@ export interface ExportedTrace {
  */
 export function createHistoryItem(
   state: RunnerState,
-  status: 'success' | 'failed' | 'aborted'
+  status: 'success' | 'failed' | 'aborted',
+  screenshotIds?: string[]
 ): HistoryItem {
   const startedAt = state.startedAt || new Date().toISOString();
   const finishedAt = state.finishedAt || new Date().toISOString();
   const durationMs = new Date(finishedAt).getTime() - new Date(startedAt).getTime();
-  const timeline = buildReplayTimeline(state.plan, state.stepResults || []);
+  const timeline = buildReplayTimeline(state.currentPlan, state.stepResults || []);
 
   const uniqueId = typeof crypto !== 'undefined' && crypto.randomUUID
     ? crypto.randomUUID()
     : `run-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+
+  const fallbackPlan = {
+    goal: state.goal,
+    steps: [],
+    reasoning: 'No plan was generated.',
+    confidence: 0,
+    isGoalAchieved: false
+  };
 
   return {
     id: uniqueId,
@@ -41,15 +52,12 @@ export function createHistoryItem(
     status,
     pageTitle: state.pageTitle,
     pageUrl: state.pageUrl,
-    plan: state.plan || {
-      goal: state.goal,
-      steps: [],
-      reasoning: 'No plan was generated.',
-      confidence: 0,
-      isGoalAchieved: false
-    },
+    originalPlan: state.originalPlan || fallbackPlan,
+    currentPlan: state.currentPlan || fallbackPlan,
     stepResults: state.stepResults || [],
-    timeline
+    timeline,
+    screenshotIds: screenshotIds || [],
+    recoveryHistory: state.recoveryHistory || []
   };
 }
 
@@ -67,9 +75,11 @@ export function formatTraceForExport(item: HistoryItem): string {
     durationMs: item.durationMs,
     pageUrl: item.pageUrl,
     pageTitle: item.pageTitle,
-    plan: item.plan,
+    originalPlan: item.originalPlan,
+    currentPlan: item.currentPlan,
     stepResults: item.stepResults,
-    timeline: item.timeline
+    timeline: item.timeline,
+    recoveryHistory: item.recoveryHistory
   };
   return JSON.stringify(trace, null, 2);
 }

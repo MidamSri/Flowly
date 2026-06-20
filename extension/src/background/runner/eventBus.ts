@@ -52,6 +52,44 @@ export const eventBus = {
       case 'MEMORY_CREATED':
         logMsg = `Memory created: ${payload.message || 'Stored experience'}`;
         break;
+      case 'SCREENSHOT_CAPTURED':
+        logMsg = `Screenshot captured for ${payload.stepIndex !== undefined && payload.stepIndex !== null ? `step ${payload.stepIndex + 1}` : 'run start/end'}.`;
+        break;
+      case 'RECOVERY_STARTED':
+        logMsg = `⚠ Recovery started: ${payload.message || 'Requesting corrective actions'}`;
+        logLevel = 'warn';
+        break;
+      case 'RECOVERY_SUCCEEDED':
+        logMsg = `✓ Recovery succeeded: ${payload.message || 'Plan fragment complete'}`;
+        break;
+      case 'RECOVERY_FAILED':
+        logMsg = `✗ Recovery failed: ${payload.error || payload.message || 'Unknown error'}`;
+        logLevel = 'error';
+        break;
+      case 'GOAL_COMPLETED':
+        logMsg = `✓ Goal Completed: ${payload.message}`;
+        logLevel = 'info';
+        break;
+      case 'GOAL_NOT_COMPLETED':
+        logMsg = `⚠ Goal Not Completed: ${payload.message}`;
+        logLevel = 'warn';
+        break;
+      case 'SESSION_STARTED':
+        logMsg = `🚀 Session Started: ${payload.message}`;
+        logLevel = 'info';
+        break;
+      case 'SESSION_FINISHED':
+        logMsg = `🏁 Session Finished: ${payload.message}`;
+        logLevel = 'info';
+        break;
+      case 'ITERATION_STARTED':
+        logMsg = `🔄 Iteration Started: ${payload.message}`;
+        logLevel = 'info';
+        break;
+      case 'ITERATION_FINISHED':
+        logMsg = `🔄 Iteration Finished: ${payload.message}`;
+        logLevel = 'info';
+        break;
     }
 
     if (logMsg) {

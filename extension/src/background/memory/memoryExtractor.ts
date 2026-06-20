@@ -20,7 +20,7 @@ export async function extractAndStoreMemory(state: RunnerState, status: 'success
   }
 
   if (status === 'success') {
-    const actions = state.plan?.steps || [];
+    const actions = state.currentPlan?.steps || [];
     if (actions.length === 0) return;
 
     const pattern = createSuccessfulPattern(domain, state.goal, actions);
@@ -37,7 +37,7 @@ export async function extractAndStoreMemory(state: RunnerState, status: 'success
     if (failedStepIndex === -1) return;
 
     const failedStep = failedStepIndex + 1; // 1-indexed for clarity
-    const failedAction = state.plan?.steps ? state.plan.steps[failedStepIndex] : undefined;
+    const failedAction = state.currentPlan?.steps ? state.currentPlan.steps[failedStepIndex] : undefined;
     const error = state.stepResults?.[failedStepIndex]?.error || 'Step execution failed';
 
     const pattern = createFailurePattern(domain, state.goal, failedStep, error, failedAction);
