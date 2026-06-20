@@ -63,7 +63,7 @@ function App() {
     portRef.current?.postMessage({ type: 'CANCEL_RUN' } as SidebarRequest);
   };
 
-  const { status, plan, stepStatuses, currentStepIndex, logs, pageTitle, pageUrl } = runnerState;
+  const { status, plan, stepStatuses, stepResults, currentStepIndex, logs, pageTitle, pageUrl, startedAt, finishedAt } = runnerState;
 
   const isPlanning = status === 'parsing' || status === 'planning';
   const isExecuting = status === 'executing';
@@ -353,9 +353,77 @@ function App() {
                     <div style={{ fontWeight: 600, textTransform: 'capitalize', display: 'flex', alignItems: 'center', gap: '6px' }}>
                       <span>Step {idx + 1}: {step.type}</span>
                       {step.elementId && <code style={{ fontSize: '10px', color: 'var(--accent-blue)', background: 'rgba(14, 165, 233, 0.1)', padding: '1px 4px', borderRadius: '3px' }}>{step.elementId}</code>}
+                      {stepResults && stepResults[idx] && (
+                        <span style={{
+                          fontSize: '10px',
+                          color: 'var(--text-muted)',
+                          marginLeft: 'auto',
+                          background: 'rgba(255,255,255,0.05)',
+                          padding: '1px 4px',
+                          borderRadius: '3px',
+                          fontFamily: "'JetBrains Mono', monospace"
+                        }}>
+                          {stepResults[idx].durationMs >= 1000 
+                            ? `${(stepResults[idx].durationMs / 1000).toFixed(1)}s` 
+                            : `${stepResults[idx].durationMs}ms`}
+                        </span>
+                      )}
                     </div>
                     {step.value && <div style={{ color: 'var(--text-main)', opacity: 0.9, marginTop: '2px', fontFamily: 'monospace', wordBreak: 'break-all' }}>Value: "{step.value}"</div>}
                     <div style={{ color: 'var(--text-muted)', marginTop: '2px', fontSize: '11px', fontStyle: 'italic' }}>{step.reasoning}</div>
+                    
+                    {/* Show element details if validated */}
+                    {stepResults && stepResults[idx] && (stepResults[idx].nodeRole || stepResults[idx].nodeText) && (
+                      <div style={{
+                        marginTop: '4px',
+                        fontSize: '10px',
+                        color: 'var(--text-muted)',
+                        display: 'flex',
+                        gap: '6px',
+                        background: 'rgba(255, 255, 255, 0.02)',
+                        padding: '2px 6px',
+                        borderRadius: '3px',
+                        border: '1px solid var(--border)'
+                      }}>
+                        {stepResults[idx].nodeRole && (
+                          <span>Role: <strong>{stepResults[idx].nodeRole}</strong></span>
+                        )}
+                        {stepResults[idx].nodeText && (
+                          <span style={{
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            maxWidth: '180px'
+                          }}>
+                            Text: "<em>{stepResults[idx].nodeText}</em>"
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Show navigation details inline if detected */}
+                    {stepResults && stepResults[idx] && stepResults[idx].beforeUrl !== stepResults[idx].afterUrl && (
+                      <div style={{
+                        marginTop: '4px',
+                        padding: '4px 6px',
+                        borderRadius: '4px',
+                        background: 'rgba(14, 165, 233, 0.04)',
+                        border: '1px solid rgba(14, 165, 233, 0.1)',
+                        fontSize: '10px',
+                        color: 'var(--accent-blue)',
+                        lineHeight: '1.3'
+                      }}>
+                        <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                            <circle cx="12" cy="12" r="10"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/>
+                          </svg>
+                          Navigation Detected:
+                        </div>
+                        <div style={{ wordBreak: 'break-all', opacity: 0.8, marginTop: '2px', fontFamily: "'JetBrains Mono', monospace" }}>
+                          {stepResults[idx].beforeUrl} → {stepResults[idx].afterUrl}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -432,6 +500,25 @@ function App() {
               </svg>
               Cancel Run
             </button>
+          )}
+
+          {/* Total execution duration summary */}
+          {(status === 'success' || status === 'failed') && startedAt && finishedAt && (
+            <div style={{
+              fontSize: '11px',
+              color: 'var(--text-muted)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              borderTop: '1px solid var(--border)',
+              paddingTop: '8px',
+              marginTop: '4px'
+            }}>
+              <span>Execution Summary:</span>
+              <span style={{ fontWeight: 600, color: status === 'success' ? 'var(--success)' : 'var(--error)' }}>
+                {status === 'success' ? 'Completed' : 'Failed'} in {((new Date(finishedAt).getTime() - new Date(startedAt).getTime()) / 1000).toFixed(1)}s
+              </span>
+            </div>
           )}
         </div>
       )}

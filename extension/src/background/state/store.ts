@@ -1,4 +1,4 @@
-import { RunnerState, LogMessage, ExecutionEvent, RunnerStatus, StepStatus, SemanticNode } from '@flowly/shared';
+import { RunnerState, LogMessage, ExecutionEvent, RunnerStatus, StepStatus, SemanticNode, ActionResult } from '@flowly/shared';
 
 let state: RunnerState = {
   goal: '',
@@ -6,6 +6,7 @@ let state: RunnerState = {
   plan: null,
   currentStepIndex: null,
   stepStatuses: [],
+  stepResults: [],
   logs: [],
   pageTitle: '',
   pageUrl: '',
@@ -49,6 +50,7 @@ export function resetState(): void {
     plan: null,
     currentStepIndex: null,
     stepStatuses: [],
+    stepResults: [],
     logs: [],
     pageTitle: '',
     pageUrl: '',
@@ -89,5 +91,10 @@ export function setLastParsedNodes(nodes: SemanticNode[]): void {
 
 export function getLastParsedNodes(): SemanticNode[] {
   return lastParsedNodes;
+}
+
+export function addStepResult(result: ActionResult): void {
+  state.stepResults = [...(state.stepResults || []), result];
+  stateListeners.forEach(listener => listener(state));
 }
 

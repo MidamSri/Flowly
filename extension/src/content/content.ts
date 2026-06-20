@@ -1,5 +1,6 @@
 import { buildAccessibilityTree } from './parser/accessibilityTree';
 import { click, type, scroll, wait } from './executor/elementActions';
+import { isVisible } from './parser/visibility';
 import { ContentRequest, ContentResponse } from '@flowly/shared';
 
 console.log('%c[Flowly] Perception Layer Content Script Loaded & Listening', 'color: #6366f1; font-weight: bold; font-size: 14px;');
@@ -90,5 +91,66 @@ chrome.runtime.onMessage.addListener((request: ContentRequest, sender, sendRespo
       }
     })();
     return true; // Keep message channel open for async response
+  }
+
+  if (request.type === 'VALIDATE_ELEMENT_REQUEST') {
+    try {
+      const el = document.querySelector(`[data-flowly-id="${request.elementId}"]`) as HTMLElement | null;
+      if (!el) {
+        sendResponse({
+          type: 'VALIDATE_ELEMENT_RESPONSE',
+          success: true,
+          exists: false,
+          visible: false,
+          enabled: false
+        });
+      } else {
+        const visible = isVisible(el);
+        const isDisabled = el.hasAttribute('disabled') || 
+                           el.getAttribute('aria-disabled') === 'true' || 
+                           (el as any).disabled === true;
+        const enabled = !isDisabled;
+
+        sendResponse({
+          type: 'VALIDATE_ELEMENT_RESPONSE',
+          success: true,
+          exists: true,
+          visible,
+          enabled
+        });
+      }
+    } catch (error: any) {
+      sendResponse({
+        type: 'VALIDATE_ELEMENT_RESPONSE',
+        success: false,
+        exists: false,
+        visible: false,
+        enabled: false,
+        error: error.message || String(error)
+      });
+    }
+    return true;
+  }
+
+  if (request.type === 'GET_VIEWPORT_REQUEST') {
+    try {
+      sendResponse({
+        type: 'GET_VIEWPORT_RESPONSE',
+        success: true,
+        viewport: {
+          scrollX: window.scrollX || window.pageXOffset || 0,
+          scrollY: window.scrollY || window.pageYOffset || 0,
+          viewportWidth: window.innerWidth || document.documentElement.clientWidth || 0,
+          viewportHeight: window.innerHeight || document.documentElement.clientHeight || 0
+        }
+      });
+    } catch (error: any) {
+      sendResponse({
+        type: 'GET_VIEWPORT_RESPONSE',
+        success: false,
+        error: error.message || String(error)
+      });
+    }
+    return true;
   }
 });

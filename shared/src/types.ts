@@ -55,6 +55,28 @@ export interface HistoryItem {
   error?: string;
 }
 
+export interface ViewportData {
+  scrollX: number;
+  scrollY: number;
+  viewportWidth: number;
+  viewportHeight: number;
+}
+
+export interface ActionResult {
+  success: boolean;
+  durationMs: number;
+  beforeUrl?: string;
+  afterUrl?: string;
+  beforeTitle?: string;
+  afterTitle?: string;
+  beforeViewport?: ViewportData;
+  afterViewport?: ViewportData;
+  nodeId?: string;
+  nodeRole?: string;
+  nodeText?: string;
+  error?: string;
+}
+
 export interface PlanRequest {
   goal: string;
   url: string;
@@ -84,15 +106,20 @@ export type ExecutionEventType =
   | 'STEP_STARTED'
   | 'STEP_COMPLETED'
   | 'STEP_FAILED'
+  | 'NAVIGATION_DETECTED'
   | 'RUN_FINISHED'
   | 'RUN_ABORTED';
 
 export interface ExecutionEvent {
   type: ExecutionEventType;
   timestamp: string;
-  stepIndex?: number;
+  stepIndex?: number | null;
   message?: string;
   error?: string;
+  beforeUrl?: string;
+  afterUrl?: string;
+  beforeTitle?: string;
+  afterTitle?: string;
 }
 
 export interface RunnerState {
@@ -101,6 +128,7 @@ export interface RunnerState {
   plan: ActionPlan | null;
   currentStepIndex: number | null;
   stepStatuses: StepStatus[];
+  stepResults?: ActionResult[];
   logs: LogMessage[];
   pageTitle?: string;
   pageUrl?: string;
@@ -123,9 +151,13 @@ export type SidebarResponse =
 // Background <-> Content Script (Message Passing)
 export type ContentRequest =
   | { type: 'PARSE_PAGE_REQUEST' }
-  | { type: 'EXECUTE_ACTION_REQUEST'; action: Action };
+  | { type: 'EXECUTE_ACTION_REQUEST'; action: Action }
+  | { type: 'VALIDATE_ELEMENT_REQUEST'; elementId: string }
+  | { type: 'GET_VIEWPORT_REQUEST' };
 
 export type ContentResponse =
   | { type: 'PARSE_PAGE_RESPONSE'; success: boolean; nodes: SemanticNode[]; url: string; title: string; error?: string }
-  | { type: 'EXECUTE_ACTION_RESPONSE'; success: boolean; error?: string };
+  | { type: 'EXECUTE_ACTION_RESPONSE'; success: boolean; error?: string }
+  | { type: 'VALIDATE_ELEMENT_RESPONSE'; success: boolean; exists: boolean; visible: boolean; enabled: boolean; error?: string }
+  | { type: 'GET_VIEWPORT_RESPONSE'; success: boolean; viewport?: ViewportData; error?: string };
 

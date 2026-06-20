@@ -297,4 +297,68 @@ extension/
    ✅ Extension loaded and successfully parsed the page!
    ```
 
+---
+
+## 8. Phase 4 (Execution Engine Improvements)
+
+The objective of Phase 4 was to split the background runner execution code, enrich action results (`ActionResult`) with target nodes, track scroll and viewport properties before/after actions, detect title/URL changes, implement explicit wait conditions (such as element polling, title/URL matching, and stability waits), and present enriched telemetry inside the Sidebar dashboard.
+
+### A. Repository & Directory Structure Additions
+We split the background runner code:
+```text
+extension/src/background/runner/
+├── runner.ts               # Re-exports execution plan entrypoint
+├── executePlan.ts          # Sequence loop orchestrator
+├── executeStep.ts          # Individual step interactor & telemetry gatherer
+├── eventBus.ts             # Event logging and sidebar notification mediator
+├── waitConditions.ts       # Explicit element/navigation/stability delays
+└── validators/
+    ├── beforeAction.ts     # Pre-execution checks (existence, visibility, enabled)
+    └── afterAction.ts      # Post-execution sanity hooks
+```
+
+### B. Component Details & Code Mechanics
+
+1. **Rich Action Results**:
+   Populates `ActionResult` with:
+   - `success`: overall step success status.
+   - `durationMs`: step duration in milliseconds.
+   - `beforeUrl` / `afterUrl`, `beforeTitle` / `afterTitle`.
+   - `beforeViewport` / `afterViewport`: `scrollX`, `scrollY`, `viewportWidth`, `viewportHeight`.
+   - `nodeId`, `nodeRole`, `nodeText`: descriptors of target interactive element.
+
+2. **Wait and Stability Hooks**:
+   - `waitForElement`: Polling check to avoid failing instantly if elements are rendered asynchronously.
+   - `waitForNavigation`: Observes `chrome.tabs.onUpdated` and resolves when page loading finishes.
+   - `waitForStability`: Combines `waitForNavigation`, URL stabilization monitoring (500ms stable checks), and layout settling periods.
+
+3. **Dashboard Telemetry Additions**:
+   - Renders step **durations** inline in the sequencer steps.
+   - Displays target DOM element metadata (roles, visible texts).
+   - Details inline **navigation shifts** (URL changes) under the causing step.
+   - Displays E2E elapsed run times at the bottom of the plan workspace.
+
+### C. Verification Results
+
+1. **Monorepo Build**:
+   ```bash
+   $ pnpm build
+   ...
+   extension build: dist/index.html       0.37 kB
+   extension build: dist/popup.css        1.72 kB
+   extension build: dist/content.js       6.68 kB
+   extension build: dist/background.js   11.74 kB
+   extension build: dist/popup.js       157.43 kB
+   ✅ Build succeeded without compile errors!
+   ```
+
+2. **Automated Testing**:
+   ```bash
+   $ pnpm --filter @flowly/backend test:extension
+   [Flowly] Bootstrapped perception layer. Scraped 434 nodes on startup.
+   Detected flowly ID attribute in DOM: { id: 'flowly-node-0', tag: 'A', text: 'Jump to content' }
+   ✅ Extension loaded and successfully parsed the page!
+   ```
+
+
 
